@@ -1,71 +1,139 @@
 import cv2
-import pytesseract
-import pandas as pd
+import numpy as np
+import os
 import re
+from pathlib import Path
 
-image_path = "your_image.png"
+# ============================================================
+# CONFIG
+# ============================================================
 
-img = cv2.imread(image_path)
+INPUT_FOLDER = r"C:\Users\ZahidSayyed\Desktop\bandhan_bank\table1_rows"
+OUTPUT_FOLDER = r"C:\Users\ZahidSayyed\Desktop\bandhan_bank\preprocessed"
 
-if img is None:
-    raise ValueError("Image could not be loaded")
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-print("Image shape:", img.shape)
 
-# Don't crop outside the image
-gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+# ============================================================
+# NATURAL SORT
+# table1_row2 -> table1_row3 -> ... -> table1_row10
+# ============================================================
 
-# Upscale
-gray = cv2.resize(
-    gray,
-    None,
-    fx=4,
-    fy=4,
-    interpolation=cv2.INTER_CUBIC
-)
+def natural_sort_key(path):
+    name = Path(path).stem
+    numbers = re.findall(r'\d+', name)
+    return [int(x) for x in numbers]
 
-# Threshold
-_, thresh = cv2.threshold(
-    gray,
-    0,
-    255,
-    cv2.THRESH_BINARY + cv2.THRESH_OTSU
-)
 
-# OCR
-text = pytesseract.image_to_string(
-    thresh,
-    config="--psm 6"
-)
+files = [
+    f for f in Path(INPUT_FOLDER).iterdir()
+    if f.suffix.lower() in [".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"]
+]
 
-print(text)
+files = sorted(files, key=natural_sort_key)
 
-# Clean OCR output
-lines = []
+print(f"Found {len(files)} images")
 
-for line in text.splitlines():
+for i, file in enumerate(files, start=1):
 
-    line = line.strip()
+    image = cv2.imread(str(file))
 
-    if not line:
+    if image is None:
+        print(f"Could not read: {file.name}")
         continue
 
-    # Remove unwanted characters at beginning/end
-    line = re.sub(r'^[^A-Za-z0-9]+', '', line)
-    line = re.sub(r'[^A-Za-z0-9,.\-() ]+$', '', line)
+    h, w = image.shape[:2]
 
-    if line:
-        lines.append(line)
+    # --------------------------------------------------------
+    # 1. Remove outer table border
+    # --------------------------------------------------------
+    #
+    # Adjust these if required.
+    # Start small because we don't want to cut characters.
+    #
+    border_x = max(4, int(w * 0.04))
+    border_y = max(4, int(h * 0.06))
 
-# DataFrame
-df = pd.DataFrame({
-    "branch_name": lines
-})
+    if h > 2 * border_y and w > 2 * border_x:
+        image = image[
+            border_y:h-border_y,
+            border_x:w-border_x
+        ]
 
-print(df)
+    # --------------------------------------------------------
+    # 2. Grayscale
+    # --------------------------------------------------------
 
-# Excel
-df.to_excel(
-    "output.xlsx",
-    index=False
-)
+    gray = cv2.cvtColor(
+        image,
+        cv2.COLOR_BGR2GRAY
+    )
+
+    # --------------------------------------------------------
+    # 3. Improve contrast
+    # --------------------------------------------------------
+
+    clahe = cv2.createCLAHE(
+        clipLimit=2.0,
+        tileGridSize=(8, 8)
+    )
+
+    gray = clahe.apply(gray)
+
+    # --------------------------------------------------------
+    # 4. Light denoising
+    # --------------------------------------------------------
+
+    gray = cv2.GaussianBlur(
+        gray,
+        (3, 3),
+        0
+    )
+
+    # --------------------------------------------------------
+    # 5. Upscale
+    # --------------------------------------------------------
+
+    gray = cv2.resize(
+        gray,
+        None,
+        fx=3,
+        fy=3,
+        interpolation=cv2.INTER_CUBIC
+    )
+
+    # --------------------------------------------------------
+    # 6. Slight sharpening
+    # --------------------------------------------------------
+
+    kernel = np.array([
+        [0, -1, 0],
+        [-1, 5, -1],
+        [0, -1, 0]
+    ])
+
+    sharpened = cv2.filter2D(
+        gray,
+        -1,
+        kernel
+    )
+
+    # --------------------------------------------------------
+    # Save
+    # --------------------------------------------------------
+
+    output_path = (
+        Path(OUTPUT_FOLDER)
+        / f"{file.stem}_clean.png"
+    )
+
+    cv2.imwrite(
+        str(output_path),
+        sharpened
+    )
+
+    print(
+        f"{i:03d} | {file.name} -> {output_path.name}"
+    )
+
+print("\nPreprocessing complete.")
