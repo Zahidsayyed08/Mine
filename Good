@@ -1,74 +1,26 @@
 import cv2
 import pytesseract
 import pandas as pd
+import re
 
-# Load image
-img = cv2.imread("image.jpg")
+image_path = "your_image.png"
 
-# Crop the area containing the data
-crop = img[180:800, 400:550]
-
-# Convert to grayscale
-gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-
-# Improve image
-gray = cv2.resize(gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-
-# Threshold
-_, thresh = cv2.threshold(
-    gray, 0, 255,
-    cv2.THRESH_BINARY + cv2.THRESH_OTSU
-)
-
-# OCR
-text = pytesseract.image_to_string(
-    thresh,
-    config="--psm 6"
-)
-
-print(text)
-
-# Extract only numbers
-numbers = []
-
-for line in text.splitlines():
-    line = line.strip()
-
-    if line.isdigit():
-        numbers.append(int(line))
-
-# Create DataFrame
-df = pd.DataFrame({
-    "sl_no": numbers
-})
-
-print(df)
-
-
-
-
-
-
-import cv2
-import pytesseract
-import pandas as pd
-
-img = cv2.imread("image.jpg")
+img = cv2.imread(image_path)
 
 if img is None:
-    raise ValueError("Image could not be loaded. Check the file path.")
+    raise ValueError("Image could not be loaded")
 
 print("Image shape:", img.shape)
 
-# Use the whole image first
+# Don't crop outside the image
 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
 # Upscale
 gray = cv2.resize(
     gray,
     None,
-    fx=3,
-    fy=3,
+    fx=4,
+    fy=4,
     interpolation=cv2.INTER_CUBIC
 )
 
@@ -87,3 +39,33 @@ text = pytesseract.image_to_string(
 )
 
 print(text)
+
+# Clean OCR output
+lines = []
+
+for line in text.splitlines():
+
+    line = line.strip()
+
+    if not line:
+        continue
+
+    # Remove unwanted characters at beginning/end
+    line = re.sub(r'^[^A-Za-z0-9]+', '', line)
+    line = re.sub(r'[^A-Za-z0-9,.\-() ]+$', '', line)
+
+    if line:
+        lines.append(line)
+
+# DataFrame
+df = pd.DataFrame({
+    "branch_name": lines
+})
+
+print(df)
+
+# Excel
+df.to_excel(
+    "output.xlsx",
+    index=False
+)
