@@ -1,75 +1,45 @@
-from pathlib import Path
+import cv2
+import pytesseract
+import pandas as pd
 
-# ============================================================
-# PATHS
-# ============================================================
+# Load image
+img = cv2.imread("image.jpg")
 
-BASE_DIR = Path(__file__).resolve().parent
+# Crop the area containing the data
+crop = img[180:800, 400:550]
 
-INPUT_PDF = BASE_DIR / "input" / "bandhan.pdf"
+# Convert to grayscale
+gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
-OUTPUT_DIR = BASE_DIR / "output"
+# Improve image
+gray = cv2.resize(gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
 
-OUTPUT_EXCEL = OUTPUT_DIR / "bandhan_branches.xlsx"
-OUTPUT_REVIEW = OUTPUT_DIR / "manual_review.csv"
+# Threshold
+_, thresh = cv2.threshold(
+    gray, 0, 255,
+    cv2.THRESH_BINARY + cv2.THRESH_OTSU
+)
 
-DEBUG_DIR = OUTPUT_DIR / "debug"
-
-
-# ============================================================
-# PDF RENDERING
-# ============================================================
-
-# 300 is usually enough.
-# For tiny text, 400 gives better OCR at the cost of speed/storage.
-DPI = 400
-
-
-# ============================================================
 # OCR
-# ============================================================
+text = pytesseract.image_to_string(
+    thresh,
+    config="--psm 6"
+)
 
-OCR_LANG = "en"
+print(text)
 
-# Minimum confidence before considering a cell suspicious.
-MIN_CONFIDENCE = 0.85
+# Extract only numbers
+numbers = []
 
+for line in text.splitlines():
+    line = line.strip()
 
-# ============================================================
-# TESSERACT
-# ============================================================
+    if line.isdigit():
+        numbers.append(int(line))
 
-TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# Create DataFrame
+df = pd.DataFrame({
+    "sl_no": numbers
+})
 
-
-# ============================================================
-# IMAGE PROCESSING
-# ============================================================
-
-UPSCALE = 3
-
-# Adaptive threshold parameters
-ADAPTIVE_BLOCK_SIZE = 31
-ADAPTIVE_C = 11
-
-
-# ============================================================
-# TABLE DETECTION
-# ============================================================
-
-# Minimum percentage of page width that a detected horizontal
-# table block should occupy.
-MIN_TABLE_WIDTH_RATIO = 0.15
-
-# Minimum line length relative to page width.
-MIN_HORIZONTAL_LINE_RATIO = 0.10
-
-# Minimum line length relative to page height.
-MIN_VERTICAL_LINE_RATIO = 0.10
-
-
-# ============================================================
-# OUTPUT
-# ============================================================
-
-EXCEL_SHEET_NAME = "Branches"
+print(df)
