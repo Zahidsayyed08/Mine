@@ -1,0 +1,75 @@
+from pathlib import Path
+
+# ============================================================
+# PATHS
+# ============================================================
+
+BASE_DIR = Path(__file__).resolve().parent
+
+INPUT_PDF = BASE_DIR / "input" / "bandhan.pdf"
+
+OUTPUT_DIR = BASE_DIR / "output"
+
+OUTPUT_EXCEL = OUTPUT_DIR / "bandhan_branches.xlsx"
+OUTPUT_REVIEW = OUTPUT_DIR / "manual_review.csv"
+
+DEBUG_DIR = OUTPUT_DIR / "debug"
+
+
+# ============================================================
+# PDF RENDERING
+# ============================================================
+
+# 300 is usually enough.
+# For tiny text, 400 gives better OCR at the cost of speed/storage.
+DPI = 400
+
+
+# ============================================================
+# OCR
+# ============================================================
+
+OCR_LANG = "en"
+
+# Minimum confidence before considering a cell suspicious.
+MIN_CONFIDENCE = 0.85
+
+
+# ============================================================
+# TESSERACT
+# ============================================================
+
+TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+
+# ============================================================
+# IMAGE PROCESSING
+# ============================================================
+
+UPSCALE = 3
+
+# Adaptive threshold parameters
+ADAPTIVE_BLOCK_SIZE = 31
+ADAPTIVE_C = 11
+
+
+# ============================================================
+# TABLE DETECTION
+# ============================================================
+
+# Minimum percentage of page width that a detected horizontal
+# table block should occupy.
+MIN_TABLE_WIDTH_RATIO = 0.15
+
+# Minimum line length relative to page width.
+MIN_HORIZONTAL_LINE_RATIO = 0.10
+
+# Minimum line length relative to page height.
+MIN_VERTICAL_LINE_RATIO = 0.10
+
+
+# ============================================================
+# OUTPUT
+# ============================================================
+
+EXCEL_SHEET_NAME = "Branches"
