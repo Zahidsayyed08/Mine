@@ -1,0 +1,9 @@
+opencv-python
+numpy
+pandas
+openpyxl
+PyMuPDF
+pytesseract
+Pillow
+rapidfuzz
+paddleocr
