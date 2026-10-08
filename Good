@@ -147,3 +147,202 @@ print(df)
 print(
     f"\nSaved to:\n{OUTPUT_CSV}"
 )
+
+
+
+
+
+
+
+
+
+
+import cv2
+import pytesseract
+import pandas as pd
+from pathlib import Path
+import re
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+INPUT_FOLDER = r"C:\Users\ZahidSayyed\Desktop\bandhan_bank\preprocessed"
+
+OUTPUT_CSV = r"C:\Users\ZahidSayyed\Desktop\bandhan_bank\number_ocr_results.csv"
+
+pytesseract.pytesseract.tesseract_cmd = (
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+)
+
+
+# ============================================================
+# NATURAL SORT
+# ============================================================
+
+def natural_sort_key(path):
+    numbers = re.findall(r'\d+', Path(path).stem)
+    return [int(x) for x in numbers]
+
+
+files = [
+    f for f in Path(INPUT_FOLDER).iterdir()
+    if f.suffix.lower() in [".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"]
+]
+
+files = sorted(files, key=natural_sort_key)
+
+
+# ============================================================
+# OCR NUMBER
+# ============================================================
+
+def ocr_number(image):
+
+    # Grayscale
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image.copy()
+
+    # Upscale
+    gray = cv2.resize(
+        gray,
+        None,
+        fx=3,
+        fy=3,
+        interpolation=cv2.INTER_CUBIC
+    )
+
+    # Improve contrast
+    gray = cv2.normalize(
+        gray,
+        None,
+        0,
+        255,
+        cv2.NORM_MINMAX
+    )
+
+    # Threshold
+    _, binary = cv2.threshold(
+        gray,
+        0,
+        255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+
+    candidates = []
+
+    # Try PSM 7
+    text7 = pytesseract.image_to_string(
+        binary,
+        config="--psm 7 -c tessedit_char_whitelist=0123456789",
+        lang="eng"
+    )
+
+    # Try PSM 8
+    text8 = pytesseract.image_to_string(
+        binary,
+        config="--psm 8 -c tessedit_char_whitelist=0123456789",
+        lang="eng"
+    )
+
+    candidates.extend([text7, text8])
+
+    # ========================================================
+    # CLEAN OCR RESULTS
+    # ========================================================
+
+    cleaned = []
+
+    for text in candidates:
+
+        text = text.strip()
+
+        # Keep only digits
+        digits = re.sub(
+            r"[^0-9]",
+            "",
+            text
+        )
+
+        if digits:
+            cleaned.append(digits)
+
+    if not cleaned:
+        return None
+
+    # Choose longest valid numeric result
+    result = max(
+        cleaned,
+        key=len
+    )
+
+    return int(result)
+
+
+# ============================================================
+# SEQUENTIAL PROCESSING
+# ============================================================
+
+results = []
+
+for sequence, file in enumerate(files, start=1):
+
+    print(
+        f"{sequence}/{len(files)} -> {file.name}",
+        end=" : "
+    )
+
+    image = cv2.imread(
+        str(file),
+        cv2.IMREAD_GRAYSCALE
+    )
+
+    if image is None:
+
+        print("IMAGE ERROR")
+
+        results.append({
+            "sequence": sequence,
+            "filename": file.name,
+            "sl_no": None
+        })
+
+        continue
+
+    number = ocr_number(image)
+
+    print(number)
+
+    # Append immediately
+    results.append({
+        "sequence": sequence,
+        "filename": file.name,
+        "sl_no": number
+    })
+
+
+# ============================================================
+# DATAFRAME
+# ============================================================
+
+df = pd.DataFrame(results)
+
+
+# ============================================================
+# SAVE
+# ============================================================
+
+df.to_csv(
+    OUTPUT_CSV,
+    index=False,
+    encoding="utf-8-sig"
+)
+
+print("\nOCR COMPLETE")
+print(df)
+
+print(
+    f"\nSaved to:\n{OUTPUT_CSV}"
+)
