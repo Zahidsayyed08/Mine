@@ -4,103 +4,122 @@ import numpy as np
 # Clean column names
 df.columns = df.columns.str.strip()
 
-# Normalize relevant text columns
-text_cols = [
-    "customer_id", "category", "sub_category",
-    "direction", "purpose", "sms_text"
+# Ensure relevant columns exist
+required_cols = [
+    "customer_id", "sms_date", "direction",
+    "category", "sub_category", "merchant", "upi_app"
 ]
 
-for col in text_cols:
-    if col in df.columns:
-        df[col] = df[col].fillna("").astype(str).str.strip()
+missing_cols = [c for c in required_cols if c not in df.columns]
 
-# Convert amount to numeric
-df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
+if missing_cols:
+    raise ValueError(f"Missing required columns: {missing_cols}")
 
-# Combine text fields for classification
-text_fields = [
-    c for c in ["category", "sub_category", "purpose", "sms_text"]
-    if c in df.columns
-]
-
-df["_search_text"] = (
-    df[text_fields].agg(" ".join, axis=1).str.lower()
+# Prepare data
+df["sms_date"] = pd.to_datetime(
+    df["sms_date"], errors="coerce"
 )
 
-# Identify relevant messages
-utility_mask = df["_search_text"].str.contains(
-    r"\butility\b|\belectricity\b|\bwater bill\b|"
-    r"\bgas bill\b|\btelephone bill\b|\bbroadband\b|"
-    r"\butility bill\b",
-    regex=True,
-    na=False
-)
+for col in [
+    "customer_id", "direction", "category",
+    "sub_category", "merchant", "upi_app"
+]:
+    df[col] = df[col].fillna("").astype(str).str.strip()
 
-# Prefer explicit payment labels rather than bill reminders
-utility_payment_mask = (
-    utility_mask
-    & df["_search_text"].str.contains(
-        r"\bpaid\b|\bpayment successful\b|\bbill payment\b|"
-        r"\bpayment received\b|\bpayment debited\b",
-        regex=True,
-        na=False
+# Normalize text for classification
+df["direction"] = df["direction"].str.upper()
+df["category_lower"] = df["category"].str.lower()
+df["subcategory_lower"] = df["sub_category"].str.lower()
+
+# Identify transaction records
+transaction_mask = df["direction"].isin(["DR", "CR"])
+
+# UPI transaction records
+upi_mask = (
+    transaction_mask
+    & (
+        df["category_lower"].str.contains(r"\bupi\b", regex=True)
+        | df["subcategory_lower"].str.contains(r"\bupi\b", regex=True)
+        | df["upi_app"].str.strip().ne("")
     )
 )
 
-nach_bounce_mask = df["_search_text"].str.contains(
-    r"\bnach\b.*\b(bounce|failed|failure|return|returned)\b|"
-    r"\b(bounce|failed|failure|return|returned)\b.*\bnach\b",
-    regex=True,
-    na=False
+# Restrict temporal features to transaction records
+transactions = df.loc[transaction_mask].copy()
+
+transactions["transaction_date"] = (
+    transactions["sms_date"].dt.date
 )
 
-emi_reminder_mask = df["_search_text"].str.contains(
-    r"\bemi\b.*\b(reminder|due|pay|payment|overdue)\b|"
-    r"\b(reminder|due|pay|payment|overdue)\b.*\bemi\b",
-    regex=True,
-    na=False
+transactions["transaction_hour"] = (
+    transactions["sms_date"].dt.hour
 )
 
-collection_notice_mask = df["_search_text"].str.contains(
-    r"\b(collection notice|collection agent|"
-    r"debt collection|recovery notice|"
-    r"payment recovery|loan recovery)\b",
-    regex=True,
-    na=False
+transactions["late_night_flag"] = (
+    transactions["transaction_hour"].between(0, 4)
 )
 
-# Aggregate features by customer
-category3 = df.groupby("customer_id").agg(
-    _placeholder=("customer_id", "size")
-).drop(columns="_placeholder")
+# Identify distinct merchants and channels
+merchant_values = df["merchant"].str.strip()
 
-category3["utility_payment_count"] = (
-    utility_payment_mask.groupby(df["customer_id"]).sum()
+valid_merchant = (
+    merchant_values.ne("")
+    & ~merchant_values.str.lower().isin(
+        ["nan", "none", "unknown", "na", "n/a"]
+    )
 )
 
-# Count only successful/identified utility payments with valid amounts
-category3["total_utility_payment_amount"] = (
-    df["amount"].where(
-        utility_payment_mask & df["amount"].ge(0), 0
-    ).groupby(df["customer_id"]).sum()
+merchant_df = df.loc[valid_merchant]
+
+channel_values = df["upi_app"].str.strip()
+
+valid_channel = (
+    channel_values.ne("")
+    & ~channel_values.str.lower().isin(
+        ["nan", "none", "unknown", "na", "n/a"]
+    )
 )
 
-category3["nach_bounce_count"] = (
-    nach_bounce_mask.groupby(df["customer_id"]).sum()
+channel_df = df.loc[valid_channel]
+
+# Aggregate features per customer
+category5 = df.groupby("customer_id").size().to_frame(
+    "total_sms_records"
 )
 
-category3["emi_reminder_count"] = (
-    emi_reminder_mask.groupby(df["customer_id"]).sum()
+category5["upi_transaction_count"] = (
+    upi_mask.groupby(df["customer_id"]).sum()
 )
 
-category3["collection_notice_count"] = (
-    collection_notice_mask.groupby(df["customer_id"]).sum()
+category5["distinct_merchant_count"] = (
+    merchant_df.groupby("customer_id")["merchant"]
+    .nunique()
 )
 
-category3 = category3.fillna(0).reset_index()
+category5["active_days"] = (
+    transactions.dropna(subset=["transaction_date"])
+    .groupby("customer_id")["transaction_date"]
+    .nunique()
+)
 
-# Display results only; do not save files
-display(category3.head(10))
+category5["late_night_transaction_count"] = (
+    transactions.groupby("customer_id")["late_night_flag"]
+    .sum()
+)
 
-print("Customers:", category3["customer_id"].nunique())
-print("Category 3 variables:", len(category3.columns) - 1)
+category5["distinct_payment_channels"] = (
+    channel_df.groupby("customer_id")["upi_app"]
+    .nunique()
+)
+
+# Fill missing counts with zero
+category5 = category5.fillna(0).reset_index()
+
+# Remove the helper column; keep only the five derived variables
+category5 = category5.drop(columns=["total_sms_records"])
+
+# Display results only — no files saved
+display(category5.head(10))
+
+print("Customers:", category5["customer_id"].nunique())
+print("Category 5 variables:", len(category5.columns) - 1)
