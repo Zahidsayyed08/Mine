@@ -1,49 +1,104 @@
 import pandas as pd
 import numpy as np
 
-# Load cleaned dataset
-df = pd.read_excel("SMS_Data_Cleaned.xlsx")
-
-# Clean column names and categorical values
+# Prepare columns
 df.columns = df.columns.str.strip()
 
-for col in ["customer_id", "direction"]:
+df["sms_date"] = pd.to_datetime(
+    df["sms_date"], errors="coerce"
+)
+
+df["amount"] = pd.to_numeric(
+    df["amount"], errors="coerce"
+)
+
+for col in ["customer_id", "direction", "sub_category", "purpose"]:
     df[col] = df[col].astype("string").str.strip()
 
 df["direction"] = df["direction"].str.upper()
-df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
+df["sub_category"] = df["sub_category"].str.lower()
+df["purpose"] = df["purpose"].str.lower()
 
-# Identify valid debit and credit records
-valid_amount = df["amount"].notna() & (df["amount"] >= 0)
-
-debit_mask = df["direction"].eq("DR") & valid_amount
-credit_mask = df["direction"].eq("CR") & valid_amount
-
-# Create transaction amount columns
-df["debit_amount"] = df["amount"].where(debit_mask, 0)
-df["credit_amount"] = df["amount"].where(credit_mask, 0)
-
-# Derive Category 1 variables
-category1 = df.groupby("customer_id").agg(
-    total_debit_amount=("debit_amount", "sum"),
-    total_credit_amount=("credit_amount", "sum"),
-    avg_debit_amount=(
-        "amount",
-        lambda x: x[debit_mask.loc[x.index]].mean()
-    ),
-    debit_transaction_count=(
-        "direction", lambda x: x.eq("DR").sum()
+# Identify salary-credit messages
+salary_mask = (
+    df["direction"].eq("CR")
+    & (
+        df["sub_category"].str.contains(
+            "salary", na=False
+        )
+        | df["purpose"].str.contains(
+            "salary", na=False
+        )
     )
-).reset_index()
-
-# Credit-to-debit ratio
-category1["credit_to_debit_ratio"] = (
-    category1["total_credit_amount"]
-    / category1["total_debit_amount"].replace(0, np.nan)
+    & df["amount"].notna()
+    & df["amount"].ge(0)
 )
 
-# Display results only — no files saved
-display(category1.head(10))
+# Create monthly salary data
+salary_df = df.loc[
+    salary_mask, ["customer_id", "sms_date", "amount"]
+].copy()
 
-print("Customers:", category1["customer_id"].nunique())
-print("Derived variables:", len(category1.columns) - 1)
+salary_df["month"] = salary_df["sms_date"].dt.to_period("M")
+
+# Total salary received per customer per month
+monthly_salary = (
+    salary_df.dropna(subset=["month"])
+    .groupby(["customer_id", "month"])["amount"]
+    .sum()
+    .unstack(fill_value=0)
+)
+
+# Ensure all three months are represented
+months = pd.period_range("2024-11", "2025-01", freq="M")
+monthly_salary = monthly_salary.reindex(
+    columns=months, fill_value=0
+)
+
+# Calculate Category 2 features
+category2 = pd.DataFrame(index=monthly_salary.index)
+
+category2["total_salary_credits"] = monthly_salary.sum(axis=1)
+
+category2["salary_credit_months"] = (
+    monthly_salary.gt(0).sum(axis=1)
+)
+
+category2["avg_monthly_salary"] = (
+    monthly_salary.sum(axis=1) / 3
+)
+
+category2["monthly_income_variability"] = (
+    monthly_salary.std(axis=1, ddof=0)
+)
+
+# Calculate net transaction flow using valid DR/CR records
+valid_transactions = (
+    df["direction"].isin(["DR", "CR"])
+    & df["amount"].notna()
+    & df["amount"].ge(0)
+)
+
+transactions = df.loc[valid_transactions].copy()
+
+transactions["signed_amount"] = np.where(
+    transactions["direction"].eq("CR"),
+    transactions["amount"],
+    -transactions["amount"]
+)
+
+net_flow = transactions.groupby("customer_id")[
+    "signed_amount"
+].sum()
+
+category2["net_transaction_flow"] = net_flow
+
+# Keep customer IDs as a column
+category2 = category2.reset_index()
+category2 = category2.rename(columns={"index": "customer_id"})
+
+# Display results; no files are saved
+display(category2.head(10))
+
+print("Customers:", category2["customer_id"].nunique())
+print("Category 2 variables:", len(category2.columns) - 1)
