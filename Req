@@ -1,104 +1,106 @@
 import pandas as pd
 import numpy as np
 
-# Prepare columns
+# Clean column names
 df.columns = df.columns.str.strip()
 
-df["sms_date"] = pd.to_datetime(
-    df["sms_date"], errors="coerce"
+# Normalize relevant text columns
+text_cols = [
+    "customer_id", "category", "sub_category",
+    "direction", "purpose", "sms_text"
+]
+
+for col in text_cols:
+    if col in df.columns:
+        df[col] = df[col].fillna("").astype(str).str.strip()
+
+# Convert amount to numeric
+df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
+
+# Combine text fields for classification
+text_fields = [
+    c for c in ["category", "sub_category", "purpose", "sms_text"]
+    if c in df.columns
+]
+
+df["_search_text"] = (
+    df[text_fields].agg(" ".join, axis=1).str.lower()
 )
 
-df["amount"] = pd.to_numeric(
-    df["amount"], errors="coerce"
+# Identify relevant messages
+utility_mask = df["_search_text"].str.contains(
+    r"\butility\b|\belectricity\b|\bwater bill\b|"
+    r"\bgas bill\b|\btelephone bill\b|\bbroadband\b|"
+    r"\butility bill\b",
+    regex=True,
+    na=False
 )
 
-for col in ["customer_id", "direction", "sub_category", "purpose"]:
-    df[col] = df[col].astype("string").str.strip()
-
-df["direction"] = df["direction"].str.upper()
-df["sub_category"] = df["sub_category"].str.lower()
-df["purpose"] = df["purpose"].str.lower()
-
-# Identify salary-credit messages
-salary_mask = (
-    df["direction"].eq("CR")
-    & (
-        df["sub_category"].str.contains(
-            "salary", na=False
-        )
-        | df["purpose"].str.contains(
-            "salary", na=False
-        )
+# Prefer explicit payment labels rather than bill reminders
+utility_payment_mask = (
+    utility_mask
+    & df["_search_text"].str.contains(
+        r"\bpaid\b|\bpayment successful\b|\bbill payment\b|"
+        r"\bpayment received\b|\bpayment debited\b",
+        regex=True,
+        na=False
     )
-    & df["amount"].notna()
-    & df["amount"].ge(0)
 )
 
-# Create monthly salary data
-salary_df = df.loc[
-    salary_mask, ["customer_id", "sms_date", "amount"]
-].copy()
-
-salary_df["month"] = salary_df["sms_date"].dt.to_period("M")
-
-# Total salary received per customer per month
-monthly_salary = (
-    salary_df.dropna(subset=["month"])
-    .groupby(["customer_id", "month"])["amount"]
-    .sum()
-    .unstack(fill_value=0)
+nach_bounce_mask = df["_search_text"].str.contains(
+    r"\bnach\b.*\b(bounce|failed|failure|return|returned)\b|"
+    r"\b(bounce|failed|failure|return|returned)\b.*\bnach\b",
+    regex=True,
+    na=False
 )
 
-# Ensure all three months are represented
-months = pd.period_range("2024-11", "2025-01", freq="M")
-monthly_salary = monthly_salary.reindex(
-    columns=months, fill_value=0
+emi_reminder_mask = df["_search_text"].str.contains(
+    r"\bemi\b.*\b(reminder|due|pay|payment|overdue)\b|"
+    r"\b(reminder|due|pay|payment|overdue)\b.*\bemi\b",
+    regex=True,
+    na=False
 )
 
-# Calculate Category 2 features
-category2 = pd.DataFrame(index=monthly_salary.index)
-
-category2["total_salary_credits"] = monthly_salary.sum(axis=1)
-
-category2["salary_credit_months"] = (
-    monthly_salary.gt(0).sum(axis=1)
+collection_notice_mask = df["_search_text"].str.contains(
+    r"\b(collection notice|collection agent|"
+    r"debt collection|recovery notice|"
+    r"payment recovery|loan recovery)\b",
+    regex=True,
+    na=False
 )
 
-category2["avg_monthly_salary"] = (
-    monthly_salary.sum(axis=1) / 3
+# Aggregate features by customer
+category3 = df.groupby("customer_id").agg(
+    _placeholder=("customer_id", "size")
+).drop(columns="_placeholder")
+
+category3["utility_payment_count"] = (
+    utility_payment_mask.groupby(df["customer_id"]).sum()
 )
 
-category2["monthly_income_variability"] = (
-    monthly_salary.std(axis=1, ddof=0)
+# Count only successful/identified utility payments with valid amounts
+category3["total_utility_payment_amount"] = (
+    df["amount"].where(
+        utility_payment_mask & df["amount"].ge(0), 0
+    ).groupby(df["customer_id"]).sum()
 )
 
-# Calculate net transaction flow using valid DR/CR records
-valid_transactions = (
-    df["direction"].isin(["DR", "CR"])
-    & df["amount"].notna()
-    & df["amount"].ge(0)
+category3["nach_bounce_count"] = (
+    nach_bounce_mask.groupby(df["customer_id"]).sum()
 )
 
-transactions = df.loc[valid_transactions].copy()
-
-transactions["signed_amount"] = np.where(
-    transactions["direction"].eq("CR"),
-    transactions["amount"],
-    -transactions["amount"]
+category3["emi_reminder_count"] = (
+    emi_reminder_mask.groupby(df["customer_id"]).sum()
 )
 
-net_flow = transactions.groupby("customer_id")[
-    "signed_amount"
-].sum()
+category3["collection_notice_count"] = (
+    collection_notice_mask.groupby(df["customer_id"]).sum()
+)
 
-category2["net_transaction_flow"] = net_flow
+category3 = category3.fillna(0).reset_index()
 
-# Keep customer IDs as a column
-category2 = category2.reset_index()
-category2 = category2.rename(columns={"index": "customer_id"})
+# Display results only; do not save files
+display(category3.head(10))
 
-# Display results; no files are saved
-display(category2.head(10))
-
-print("Customers:", category2["customer_id"].nunique())
-print("Category 2 variables:", len(category2.columns) - 1)
+print("Customers:", category3["customer_id"].nunique())
+print("Category 3 variables:", len(category3.columns) - 1)
