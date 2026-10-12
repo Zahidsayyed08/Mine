@@ -4,10 +4,10 @@ import numpy as np
 # Clean column names
 df.columns = df.columns.str.strip()
 
-# Ensure relevant columns exist
+# Required columns
 required_cols = [
-    "customer_id", "sms_date", "direction",
-    "category", "sub_category", "merchant", "upi_app"
+    "customer_id", "category", "sub_category",
+    "direction", "purpose", "sms_text"
 ]
 
 missing_cols = [c for c in required_cols if c not in df.columns]
@@ -15,111 +15,112 @@ missing_cols = [c for c in required_cols if c not in df.columns]
 if missing_cols:
     raise ValueError(f"Missing required columns: {missing_cols}")
 
-# Prepare data
-df["sms_date"] = pd.to_datetime(
-    df["sms_date"], errors="coerce"
-)
+# Normalize text fields
+text_cols = [
+    "customer_id", "category", "sub_category",
+    "direction", "purpose", "sms_text"
+]
 
-for col in [
-    "customer_id", "direction", "category",
-    "sub_category", "merchant", "upi_app"
-]:
+for col in text_cols:
     df[col] = df[col].fillna("").astype(str).str.strip()
 
-# Normalize text for classification
 df["direction"] = df["direction"].str.upper()
-df["category_lower"] = df["category"].str.lower()
-df["subcategory_lower"] = df["sub_category"].str.lower()
 
-# Identify transaction records
-transaction_mask = df["direction"].isin(["DR", "CR"])
+# Combine relevant fields for keyword matching
+search_cols = ["category", "sub_category", "purpose", "sms_text"]
 
-# UPI transaction records
-upi_mask = (
-    transaction_mask
-    & (
-        df["category_lower"].str.contains(r"\bupi\b", regex=True)
-        | df["subcategory_lower"].str.contains(r"\bupi\b", regex=True)
-        | df["upi_app"].str.strip().ne("")
+search_text = (
+    df[search_cols]
+    .agg(" ".join, axis=1)
+    .str.lower()
+)
+
+# 1. Low-balance alerts
+low_balance_mask = search_text.str.contains(
+    r"low balance|insufficient balance|"
+    r"balance below|minimum balance|"
+    r"insufficient funds",
+    regex=True,
+    na=False
+)
+
+# 2. Loan offers
+loan_offer_mask = (
+    search_text.str.contains(
+        r"loan offer|pre-approved loan|"
+        r"instant loan|personal loan offer|"
+        r"eligible for loan|apply for loan",
+        regex=True,
+        na=False
     )
 )
 
-# Restrict temporal features to transaction records
-transactions = df.loc[transaction_mask].copy()
-
-transactions["transaction_date"] = (
-    transactions["sms_date"].dt.date
-)
-
-transactions["transaction_hour"] = (
-    transactions["sms_date"].dt.hour
-)
-
-transactions["late_night_flag"] = (
-    transactions["transaction_hour"].between(0, 4)
-)
-
-# Identify distinct merchants and channels
-merchant_values = df["merchant"].str.strip()
-
-valid_merchant = (
-    merchant_values.ne("")
-    & ~merchant_values.str.lower().isin(
-        ["nan", "none", "unknown", "na", "n/a"]
+# 3. BNPL / Pay Later transactions
+bnpl_mask = (
+    search_text.str.contains(
+        r"\bbnpl\b|buy now pay later|"
+        r"pay later|postpaid purchase",
+        regex=True,
+        na=False
     )
+    & df["direction"].isin(["DR", "CR"])
 )
 
-merchant_df = df.loc[valid_merchant]
+# 4. Refund messages
+refund_mask = search_text.str.contains(
+    r"\brefund\b|\brefunded\b|"
+    r"refund processed|amount reversed",
+    regex=True,
+    na=False
+)
 
-channel_values = df["upi_app"].str.strip()
-
-valid_channel = (
-    channel_values.ne("")
-    & ~channel_values.str.lower().isin(
-        ["nan", "none", "unknown", "na", "n/a"]
+# 5. ATM cash withdrawals
+atm_mask = (
+    search_text.str.contains(
+        r"\batm\b",
+        regex=True,
+        na=False
     )
+    & search_text.str.contains(
+        r"withdraw|cash dispensed|cash withdrawal",
+        regex=True,
+        na=False
+    )
+    & df["direction"].eq("DR")
 )
 
-channel_df = df.loc[valid_channel]
-
-# Aggregate features per customer
-category5 = df.groupby("customer_id").size().to_frame(
-    "total_sms_records"
+# Aggregate counts by customer
+category4 = df.groupby("customer_id").size().to_frame(
+    "_temporary_count"
 )
 
-category5["upi_transaction_count"] = (
-    upi_mask.groupby(df["customer_id"]).sum()
+category4["low_balance_alert_count"] = (
+    low_balance_mask.groupby(df["customer_id"]).sum()
 )
 
-category5["distinct_merchant_count"] = (
-    merchant_df.groupby("customer_id")["merchant"]
-    .nunique()
+category4["loan_offer_message_count"] = (
+    loan_offer_mask.groupby(df["customer_id"]).sum()
 )
 
-category5["active_days"] = (
-    transactions.dropna(subset=["transaction_date"])
-    .groupby("customer_id")["transaction_date"]
-    .nunique()
+category4["bnpl_transaction_count"] = (
+    bnpl_mask.groupby(df["customer_id"]).sum()
 )
 
-category5["late_night_transaction_count"] = (
-    transactions.groupby("customer_id")["late_night_flag"]
-    .sum()
+category4["refund_message_count"] = (
+    refund_mask.groupby(df["customer_id"]).sum()
 )
 
-category5["distinct_payment_channels"] = (
-    channel_df.groupby("customer_id")["upi_app"]
-    .nunique()
+category4["atm_withdrawal_count"] = (
+    atm_mask.groupby(df["customer_id"]).sum()
 )
 
-# Fill missing counts with zero
-category5 = category5.fillna(0).reset_index()
-
-# Remove the helper column; keep only the five derived variables
-category5 = category5.drop(columns=["total_sms_records"])
+# Keep only the five derived variables and customer ID
+category4 = category4.drop(
+    columns="_temporary_count"
+).reset_index()
 
 # Display results only — no files saved
-display(category5.head(10))
+display(category4.head(10))
 
-print("Customers:", category5["customer_id"].nunique())
-print("Category 5 variables:", len(category5.columns) - 1)
+print("Customers:", category4["customer_id"].nunique())
+print("Category 4 variables:", len(category4.columns) - 1)
