@@ -1,82 +1,49 @@
 import pandas as pd
-from pathlib import Path
+import numpy as np
 
-# Input and output file paths
-input_file = Path("SMS_Data.txt")
-output_file = Path("SMS_Data_Cleaned.xlsx")
+# Load cleaned dataset
+df = pd.read_excel("SMS_Data_Cleaned.xlsx")
 
-# Read tab-separated data, skipping the first 60 metadata lines
-df = pd.read_csv(
-    input_file,
-    sep="\t",
-    skiprows=60,
-    dtype=str,
-    encoding="utf-8",
-    on_bad_lines="warn"
-)
-
-# Clean column names
+# Clean column names and categorical values
 df.columns = df.columns.str.strip()
 
-# Remove extra spaces from text columns
-for col in df.select_dtypes(include=["object", "string"]).columns:
-    df[col] = df[col].str.strip()
+for col in ["customer_id", "direction"]:
+    df[col] = df[col].astype("string").str.strip()
 
-# Remove completely empty rows and columns
-df = df.dropna(how="all").dropna(axis=1, how="all")
+df["direction"] = df["direction"].str.upper()
+df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
 
-# Remove rows with no customer ID
-if "customer_id" in df.columns:
-    df = df[
-        df["customer_id"].notna()
-        & df["customer_id"].ne("")
-    ]
+# Identify valid debit and credit records
+valid_amount = df["amount"].notna() & (df["amount"] >= 0)
 
-# Remove exact duplicate rows
-df = df.drop_duplicates().reset_index(drop=True)
+debit_mask = df["direction"].eq("DR") & valid_amount
+credit_mask = df["direction"].eq("CR") & valid_amount
 
-print("Cleaning completed!")
-print("Dataset shape:", df.shape)
-print("Columns:", df.columns.tolist())
+# Create transaction amount columns
+df["debit_amount"] = df["amount"].where(debit_mask, 0)
+df["credit_amount"] = df["amount"].where(credit_mask, 0)
 
-display(df.head())
-
-
-
-
-
-# Convert date column to datetime
-if "sms_date" in df.columns:
-    df["sms_date"] = pd.to_datetime(
-        df["sms_date"],
-        errors="coerce"
+# Derive Category 1 variables
+category1 = df.groupby("customer_id").agg(
+    total_debit_amount=("debit_amount", "sum"),
+    total_credit_amount=("credit_amount", "sum"),
+    avg_debit_amount=(
+        "amount",
+        lambda x: x[debit_mask.loc[x.index]].mean()
+    ),
+    debit_transaction_count=(
+        "direction", lambda x: x.eq("DR").sum()
     )
+).reset_index()
 
-# Convert amount to numeric
-if "amount" in df.columns:
-    df["amount"] = pd.to_numeric(
-        df["amount"].str.replace(",", "", regex=False),
-        errors="coerce"
-    )
-
-# Save cleaned data to Excel
-df.to_excel(
-    output_file,
-    index=False,
-    engine="openpyxl"
+# Credit-to-debit ratio
+category1["credit_to_debit_ratio"] = (
+    category1["total_credit_amount"]
+    / category1["total_debit_amount"].replace(0, np.nan)
 )
 
-print(f"Excel file saved successfully: {output_file.resolve()}")
-print("Total rows:", len(df))
-print("Total columns:", len(df.columns))
+# Display results only — no files saved
+display(category1.head(10))
 
-
-
-
-
-
-check_df = pd.read_excel("SMS_Data_Cleaned.xlsx")
-
-display(check_df.head())
-print("Verified shape:", check_df.shape)
-print("Missing values:\n", check_df.isnull().sum())
+print("Customers:", category1["customer_id"].nunique())
+print("Derived variables:", len(category1.columns) - 1)
