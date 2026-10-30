@@ -1,86 +1,31 @@
-# Extract year and day type
-txn_df['Year'] = txn_df['Transaction_Date'].dt.year
+account_volume = txn_df.groupby('Account_ID')['Transaction_Amount'].sum().reset_index()
 
-txn_df['Day_Type'] = txn_df['Transaction_Date'].dt.dayofweek.apply(
-    lambda x: 'Weekend' if x >= 5 else 'Weekday'
+account_volume.columns = ['Account_ID', 'Total_Transaction_Volume']
+
+account_volume.head()
+
+# Create 5 transaction volume categories
+account_volume['Volume_Range'] = pd.qcut(
+    account_volume['Total_Transaction_Volume'],
+    q=5,
+    labels=['Very Low', 'Low', 'Medium', 'High', 'Very High'],
+    duplicates='drop'
 )
 
-# Calculate daily transaction volume
-daily_volume = txn_df.groupby(
-    ['Year', 'Transaction_Date', 'Day_Type']
-)['Transaction_Amount'].sum().reset_index()
 
-# Calculate average daily volume
-q3_result = daily_volume.groupby(
-    ['Year', 'Day_Type']
-)['Transaction_Amount'].mean().unstack()
+q6_result = account_volume['Volume_Range'].value_counts(sort=False)
 
-print(q3_result)
-
-
+print(q6_result)
 
 
 import matplotlib.pyplot as plt
 
-q3_result.plot(kind='bar', figsize=(12, 6))
-
-plt.title('Average Transaction Volume: Weekday vs Weekend')
-plt.xlabel('Year')
-plt.ylabel('Average Transaction Volume')
-plt.xticks(rotation=45)
-plt.tight_layout()
-plt.show()
-
-
-
-# Count transactions per account
-account_transactions = txn_df.groupby('Account_ID').size()
-
-# Filter accounts with more than 30 transactions
-accounts_above_30 = account_transactions[
-    account_transactions > 30
-]
-
-# Count accounts
-total_accounts = accounts_above_30.count()
-
-print("Accounts with more than 30 transactions:", total_accounts)
-
-
-
-
-
-account_counts = txn_df.groupby('Account_ID').size().reset_index(
-    name='Transaction_Count'
-)
-
-
-bins = [0, 10, 20, 30, 50, 100, float('inf')]
-
-labels = ['1-10', '11-20', '21-30', '31-50', '51-100', 'Above 100']
-
-account_counts['Transaction_Range'] = pd.cut(
-    account_counts['Transaction_Count'],
-    bins=bins,
-    labels=labels
-)
-
-
-
-q5_result = account_counts['Transaction_Range'].value_counts(
-    sort=False
-)
-
-print(q5_result)
-
-
-
 plt.figure(figsize=(10, 6))
 
-q5_result.plot(kind='bar')
+q6_result.plot(kind='bar')
 
-plt.title('Distribution of Accounts Across Transaction Counts')
-plt.xlabel('Transaction Count Range')
+plt.title('Distribution of Accounts Across Transaction Volumes')
+plt.xlabel('Transaction Volume Category')
 plt.ylabel('Number of Accounts')
 
 plt.xticks(rotation=0)
