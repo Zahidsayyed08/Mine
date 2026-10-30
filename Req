@@ -1,14 +1,55 @@
-credit_types = ['a_casac_txn', 'a_int_txn']
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
-debit_types = ['a_casad_txn', 'a_emi_pymt', 'a_tax_pymt']
+# --------------------------------
+# STEP 1: Clean transaction types
+# --------------------------------
 
-txn_df['Credit'] = txn_df['Transaction_Amount'].where(
-    txn_df['Transaction_Type'].isin(credit_types), 0
+txn_df['Transaction_Type'] = (
+    txn_df['Transaction_Type']
+    .astype(str)
+    .str.strip()
+    .str.lower()
 )
 
-txn_df['Debit'] = txn_df['Transaction_Amount'].where(
-    txn_df['Transaction_Type'].isin(debit_types), 0
+txn_df['Transaction_Amount'] = pd.to_numeric(
+    txn_df['Transaction_Amount'],
+    errors='coerce'
+).fillna(0)
+
+
+# --------------------------------
+# STEP 2: Define Credit and Debit
+# --------------------------------
+
+credit_types = [
+    'a_casac_txn',
+    'a_int_txn'
+]
+
+debit_types = [
+    'a_casad_txn',
+    'a_emi_pymt',
+    'a_tax_pymt'
+]
+
+txn_df['Credit'] = np.where(
+    txn_df['Transaction_Type'].isin(credit_types),
+    txn_df['Transaction_Amount'],
+    0
 )
+
+txn_df['Debit'] = np.where(
+    txn_df['Transaction_Type'].isin(debit_types),
+    txn_df['Transaction_Amount'],
+    0
+)
+
+
+# --------------------------------
+# STEP 3: Calculate Account Balance
+# --------------------------------
 
 account_balance = txn_df.groupby('Account_ID').agg(
     Total_Credit=('Credit', 'sum'),
@@ -20,32 +61,255 @@ account_balance['Net_Balance'] = (
     account_balance['Total_Debit']
 )
 
+
+# --------------------------------
+# STEP 4: Calculate Dense Rank
+# --------------------------------
+
 account_balance['Rank'] = account_balance['Net_Balance'].rank(
     method='dense',
     ascending=False
 ).astype(int)
 
 
-account_balance['Decile'] = pd.qcut(
-    account_balance['Rank'],
-    q=5,
-    labels=[
-        'Decile 1',
-        'Decile 2',
-        'Decile 3',
-        'Decile 4',
-        'Decile 5'
-    ]
+# --------------------------------
+# STEP 5: Assign 5 Groups
+# --------------------------------
+
+max_rank = account_balance['Rank'].max()
+
+account_balance['Decile_Number'] = np.ceil(
+    account_balance['Rank'] / max_rank * 5
+).astype(int)
+
+# Ensure rank 1 belongs to group 1
+account_balance['Decile_Number'] = (
+    account_balance['Decile_Number'].clip(1, 5)
+)
+
+account_balance['Decile'] = (
+    'Decile ' + account_balance['Decile_Number'].astype(str)
 )
 
 
-q11_result = account_balance.groupby(
-    'Decile',
-    observed=False
-).agg(
+# --------------------------------
+# STEP 6: Create Final Distribution
+# --------------------------------
+
+q11_result = account_balance.groupby('Decile').agg(
     Account_Count=('Account_ID', 'count'),
     Average_Net_Balance=('Net_Balance', 'mean'),
     Total_Net_Balance=('Net_Balance', 'sum')
 )
 
+# Arrange groups in correct order
+decile_order = [
+    'Decile 1',
+    'Decile 2',
+    'Decile 3',
+    'Decile 4',
+    'Decile 5'
+]
+
+q11_result = q11_result.reindex(decile_order, fill_value=0)
+
+print("QUESTION 11: NET BALANCE DISTRIBUTION")
 print(q11_result)
+
+
+# --------------------------------
+# STEP 7: Create Chart
+# --------------------------------
+
+plt.figure(figsize=(10, 6))
+
+q11_result['Account_Count'].plot(kind='bar')
+
+plt.title('Distribution of Accounts Across Net Balance Groups')
+plt.xlabel('Net Balance Groups')
+plt.ylabel('Number of Accounts')
+
+plt.xticks(rotation=0)
+plt.tight_layout()
+plt.show()
+
+
+# --------------------------------
+# STEP 8: Verify Results
+# --------------------------------
+
+print("\nTotal Accounts:", account_balance['Account_ID'].nunique())
+
+print("Unique Net Balances:",
+      account_balance['Net_Balance'].nunique())
+
+print("Unique Dense Ranks:",
+      account_balance['Rank'].nunique())
+
+print("\nUnmapped Transaction Types:")
+
+print(
+    txn_df.loc[
+        ~txn_df['Transaction_Type'].isin(
+            credit_types + debit_types
+        ),
+        'Transaction_Type'
+    ].value_counts()
+)import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --------------------------------
+# STEP 1: Clean transaction types
+# --------------------------------
+
+txn_df['Transaction_Type'] = (
+    txn_df['Transaction_Type']
+    .astype(str)
+    .str.strip()
+    .str.lower()
+)
+
+txn_df['Transaction_Amount'] = pd.to_numeric(
+    txn_df['Transaction_Amount'],
+    errors='coerce'
+).fillna(0)
+
+
+# --------------------------------
+# STEP 2: Define Credit and Debit
+# --------------------------------
+
+credit_types = [
+    'a_casac_txn',
+    'a_int_txn'
+]
+
+debit_types = [
+    'a_casad_txn',
+    'a_emi_pymt',
+    'a_tax_pymt'
+]
+
+txn_df['Credit'] = np.where(
+    txn_df['Transaction_Type'].isin(credit_types),
+    txn_df['Transaction_Amount'],
+    0
+)
+
+txn_df['Debit'] = np.where(
+    txn_df['Transaction_Type'].isin(debit_types),
+    txn_df['Transaction_Amount'],
+    0
+)
+
+
+# --------------------------------
+# STEP 3: Calculate Account Balance
+# --------------------------------
+
+account_balance = txn_df.groupby('Account_ID').agg(
+    Total_Credit=('Credit', 'sum'),
+    Total_Debit=('Debit', 'sum')
+).reset_index()
+
+account_balance['Net_Balance'] = (
+    account_balance['Total_Credit'] -
+    account_balance['Total_Debit']
+)
+
+
+# --------------------------------
+# STEP 4: Calculate Dense Rank
+# --------------------------------
+
+account_balance['Rank'] = account_balance['Net_Balance'].rank(
+    method='dense',
+    ascending=False
+).astype(int)
+
+
+# --------------------------------
+# STEP 5: Assign 5 Groups
+# --------------------------------
+
+max_rank = account_balance['Rank'].max()
+
+account_balance['Decile_Number'] = np.ceil(
+    account_balance['Rank'] / max_rank * 5
+).astype(int)
+
+# Ensure rank 1 belongs to group 1
+account_balance['Decile_Number'] = (
+    account_balance['Decile_Number'].clip(1, 5)
+)
+
+account_balance['Decile'] = (
+    'Decile ' + account_balance['Decile_Number'].astype(str)
+)
+
+
+# --------------------------------
+# STEP 6: Create Final Distribution
+# --------------------------------
+
+q11_result = account_balance.groupby('Decile').agg(
+    Account_Count=('Account_ID', 'count'),
+    Average_Net_Balance=('Net_Balance', 'mean'),
+    Total_Net_Balance=('Net_Balance', 'sum')
+)
+
+# Arrange groups in correct order
+decile_order = [
+    'Decile 1',
+    'Decile 2',
+    'Decile 3',
+    'Decile 4',
+    'Decile 5'
+]
+
+q11_result = q11_result.reindex(decile_order, fill_value=0)
+
+print("QUESTION 11: NET BALANCE DISTRIBUTION")
+print(q11_result)
+
+
+# --------------------------------
+# STEP 7: Create Chart
+# --------------------------------
+
+plt.figure(figsize=(10, 6))
+
+q11_result['Account_Count'].plot(kind='bar')
+
+plt.title('Distribution of Accounts Across Net Balance Groups')
+plt.xlabel('Net Balance Groups')
+plt.ylabel('Number of Accounts')
+
+plt.xticks(rotation=0)
+plt.tight_layout()
+plt.show()
+
+
+# --------------------------------
+# STEP 8: Verify Results
+# --------------------------------
+
+print("\nTotal Accounts:", account_balance['Account_ID'].nunique())
+
+print("Unique Net Balances:",
+      account_balance['Net_Balance'].nunique())
+
+print("Unique Dense Ranks:",
+      account_balance['Rank'].nunique())
+
+print("\nUnmapped Transaction Types:")
+
+print(
+    txn_df.loc[
+        ~txn_df['Transaction_Type'].isin(
+            credit_types + debit_types
+        ),
+        'Transaction_Type'
+    ].value_counts()
+)
