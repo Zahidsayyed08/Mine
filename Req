@@ -1,131 +1,36 @@
-account_volume = txn_df.groupby(
-    ['Year', 'Account_ID']
-)['Transaction_Amount'].sum().reset_index()
+txn_type_mapping = {
+    'a_casac_txn': 'CASA Credit',
+    'a_casad_txn': 'CASA Debit',
+    'a_emi_pymt': 'CASA EMI',
+    'a_tax_pymt': 'CASA Tax',
+    'a_int_txn': 'CASA Interest'
+}
 
-account_volume.rename(
-    columns={'Transaction_Amount': 'Total_Volume'},
-    inplace=True
+txn_df['Transaction_Category'] = txn_df['Transaction_Type'].map(
+    txn_type_mapping
 )
 
 
-import numpy as np
-import pandas as pd
-
-bins = [
-    0,
-    500000,
-    1000000,
-    1500000,
-    2000000,
-    2500000,
-    np.inf
-]
-
-labels = [
-    '0-500000',
-    '500000-1000000',
-    '1000000-1500000',
-    '1500000-2000000',
-    '2000000-2500000',
-    '2500000+'
-]
-
-account_volume['Volume_Bin'] = pd.cut(
-    account_volume['Total_Volume'],
-    bins=bins,
-    labels=labels,
-    right=False
-)
-
-
-q6_result = pd.crosstab(
-    account_volume['Volume_Bin'],
-    account_volume['Year']
-)
-
-print(q6_result)
-
-
-
-q6_result.T.plot(
-    kind='bar',
-    stacked=True,
-    figsize=(14, 7)
-)
-
-plt.title('Year-wise Distribution of Accounts Across Transaction Volumes')
-plt.xlabel('Year')
-plt.ylabel('Number of Accounts')
-plt.legend(title='Transaction Volume Bins', bbox_to_anchor=(1.05, 1))
-plt.tight_layout()
-plt.show()
-
-
-
-txn_df['Transaction_Hour'] = pd.to_datetime(
-    txn_df['Transaction_time'].astype(str),
-    format='%I:%M %p',
-    errors='coerce'
-).dt.hour
-
-
-def time_window(hour):
-
-    if pd.isna(hour):
-        return np.nan
-
-    elif 7 <= hour < 9:
-        return '7-9 AM'
-
-    elif 9 <= hour < 12:
-        return '9 AM-12 Noon'
-
-    elif 12 <= hour < 15:
-        return '12 Noon-3 PM'
-
-    elif 15 <= hour < 18:
-        return '3 PM-6 PM'
-
-    elif hour >= 18:
-        return '6 PM and after'
-
-    else:
-        return 'Before 7 AM'
-
-
-txn_df['Time_Window'] = txn_df['Transaction_Hour'].apply(time_window)
-
-
-
-q7_result = pd.crosstab(
-    txn_df['Time_Window'],
+q8_result = pd.crosstab(
+    txn_df['Transaction_Category'],
     txn_df['Year']
 )
 
-# Arrange rows in the same order as your sample
-time_order = [
-    '7-9 AM',
-    '9 AM-12 Noon',
-    '12 Noon-3 PM',
-    '3 PM-6 PM',
-    '6 PM and after'
-]
-
-q7_result = q7_result.reindex(time_order)
-
-print(q7_result)
+print(q8_result)
 
 
-q7_result.T.plot(
-    kind='line',
-    marker='o',
-    figsize=(12, 6)
+import matplotlib.pyplot as plt
+
+q8_result.T.plot(
+    kind='bar',
+    figsize=(14, 7)
 )
 
-plt.title('Year-wise Transactions Across Different Time Windows')
+plt.title('Year-wise Transaction Count by Transaction Category')
 plt.xlabel('Year')
 plt.ylabel('Number of Transactions')
-plt.legend(title='Time Window')
-plt.grid(True)
+
+plt.legend(title='Transaction Category')
+plt.xticks(rotation=45)
 plt.tight_layout()
 plt.show()
