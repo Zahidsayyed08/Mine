@@ -59,3 +59,73 @@ plt.ylabel('Number of Accounts')
 plt.legend(title='Transaction Volume Bins', bbox_to_anchor=(1.05, 1))
 plt.tight_layout()
 plt.show()
+
+
+
+txn_df['Transaction_Hour'] = pd.to_datetime(
+    txn_df['Transaction_time'].astype(str),
+    format='%I:%M %p',
+    errors='coerce'
+).dt.hour
+
+
+def time_window(hour):
+
+    if pd.isna(hour):
+        return np.nan
+
+    elif 7 <= hour < 9:
+        return '7-9 AM'
+
+    elif 9 <= hour < 12:
+        return '9 AM-12 Noon'
+
+    elif 12 <= hour < 15:
+        return '12 Noon-3 PM'
+
+    elif 15 <= hour < 18:
+        return '3 PM-6 PM'
+
+    elif hour >= 18:
+        return '6 PM and after'
+
+    else:
+        return 'Before 7 AM'
+
+
+txn_df['Time_Window'] = txn_df['Transaction_Hour'].apply(time_window)
+
+
+
+q7_result = pd.crosstab(
+    txn_df['Time_Window'],
+    txn_df['Year']
+)
+
+# Arrange rows in the same order as your sample
+time_order = [
+    '7-9 AM',
+    '9 AM-12 Noon',
+    '12 Noon-3 PM',
+    '3 PM-6 PM',
+    '6 PM and after'
+]
+
+q7_result = q7_result.reindex(time_order)
+
+print(q7_result)
+
+
+q7_result.T.plot(
+    kind='line',
+    marker='o',
+    figsize=(12, 6)
+)
+
+plt.title('Year-wise Transactions Across Different Time Windows')
+plt.xlabel('Year')
+plt.ylabel('Number of Transactions')
+plt.legend(title='Time Window')
+plt.grid(True)
+plt.tight_layout()
+plt.show()
