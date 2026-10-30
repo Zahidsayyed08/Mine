@@ -1,36 +1,101 @@
-txn_type_mapping = {
-    'a_casac_txn': 'CASA Credit',
-    'a_casad_txn': 'CASA Debit',
-    'a_emi_pymt': 'CASA EMI',
-    'a_tax_pymt': 'CASA Tax',
-    'a_int_txn': 'CASA Interest'
-}
+accepted_df = txn_df[
+    txn_df['Transaction_Status'].str.strip().str.lower() == 'accepted'
+].copy()
 
-txn_df['Transaction_Category'] = txn_df['Transaction_Type'].map(
-    txn_type_mapping
+
+credit_types = ['a_casac_txn', 'a_int_txn']
+
+debit_types = ['a_casad_txn', 'a_emi_pymt', 'a_tax_pymt']
+
+accepted_df['Credit'] = accepted_df.apply(
+    lambda row: row['Transaction_Amount']
+    if row['Transaction_Type'] in credit_types else 0,
+    axis=1
+)
+
+accepted_df['Debit'] = accepted_df.apply(
+    lambda row: row['Transaction_Amount']
+    if row['Transaction_Type'] in debit_types else 0,
+    axis=1
 )
 
 
-q8_result = pd.crosstab(
-    txn_df['Transaction_Category'],
-    txn_df['Year']
+q9_result = accepted_df.groupby('Account_ID').agg(
+    Total_Credit=('Credit', 'sum'),
+    Total_Debit=('Debit', 'sum')
+).reset_index()
+
+q9_result['Net_Balance'] = (
+    q9_result['Total_Credit'] - q9_result['Total_Debit']
 )
 
-print(q8_result)
+print(q9_result.head())
+
+
+print("Total Credit:", q9_result['Total_Credit'].sum())
+
+print("Total Debit:", q9_result['Total_Debit'].sum())
+
+print("Total Net Balance:", q9_result['Net_Balance'].sum())
+
+
+
+
+import numpy as np
+
+narration = accepted_df['Transaction_Narration'].str.lower()
+
+conditions = [
+    narration.str.contains('brankas', na=False),
+    narration.str.contains('paynamics', na=False),
+    narration.str.contains('pesonet', na=False),
+    narration.str.contains('visa', na=False),
+    narration.str.contains('mastercard', na=False)
+]
+
+channels = [
+    'Brankas',
+    'Paynamics',
+    'Pesonet',
+    'Visa',
+    'Mastercard'
+]
+
+accepted_df['Channel'] = np.select(
+    conditions,
+    channels,
+    default='Other'
+)
+
+
+
+q10_result = accepted_df['Channel'].value_counts()
+
+print(q10_result)
+
+
+q10_summary = accepted_df.groupby('Channel').agg(
+    Accepted_Transactions=('Transaction_ID', 'count'),
+    Total_Transaction_Amount=('Transaction_Amount', 'sum')
+).reset_index()
+
+print(q10_summary)
+
 
 
 import matplotlib.pyplot as plt
 
-q8_result.T.plot(
+q10_summary.plot(
+    x='Channel',
+    y='Accepted_Transactions',
     kind='bar',
-    figsize=(14, 7)
+    figsize=(10, 6),
+    legend=False
 )
 
-plt.title('Year-wise Transaction Count by Transaction Category')
-plt.xlabel('Year')
-plt.ylabel('Number of Transactions')
-
-plt.legend(title='Transaction Category')
-plt.xticks(rotation=45)
+plt.title('Accepted Transactions Across Different Channels')
+plt.xlabel('Transaction Channel')
+plt.ylabel('Number of Accepted Transactions')
+plt.xticks(rotation=0)
 plt.tight_layout()
 plt.show()
