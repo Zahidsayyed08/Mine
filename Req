@@ -1,33 +1,61 @@
-account_volume = txn_df.groupby('Account_ID')['Transaction_Amount'].sum().reset_index()
+account_volume = txn_df.groupby(
+    ['Year', 'Account_ID']
+)['Transaction_Amount'].sum().reset_index()
 
-account_volume.columns = ['Account_ID', 'Total_Transaction_Volume']
-
-account_volume.head()
-
-# Create 5 transaction volume categories
-account_volume['Volume_Range'] = pd.qcut(
-    account_volume['Total_Transaction_Volume'],
-    q=5,
-    labels=['Very Low', 'Low', 'Medium', 'High', 'Very High'],
-    duplicates='drop'
+account_volume.rename(
+    columns={'Transaction_Amount': 'Total_Volume'},
+    inplace=True
 )
 
 
-q6_result = account_volume['Volume_Range'].value_counts(sort=False)
+import numpy as np
+import pandas as pd
+
+bins = [
+    0,
+    500000,
+    1000000,
+    1500000,
+    2000000,
+    2500000,
+    np.inf
+]
+
+labels = [
+    '0-500000',
+    '500000-1000000',
+    '1000000-1500000',
+    '1500000-2000000',
+    '2000000-2500000',
+    '2500000+'
+]
+
+account_volume['Volume_Bin'] = pd.cut(
+    account_volume['Total_Volume'],
+    bins=bins,
+    labels=labels,
+    right=False
+)
+
+
+q6_result = pd.crosstab(
+    account_volume['Volume_Bin'],
+    account_volume['Year']
+)
 
 print(q6_result)
 
 
-import matplotlib.pyplot as plt
 
-plt.figure(figsize=(10, 6))
+q6_result.T.plot(
+    kind='bar',
+    stacked=True,
+    figsize=(14, 7)
+)
 
-q6_result.plot(kind='bar')
-
-plt.title('Distribution of Accounts Across Transaction Volumes')
-plt.xlabel('Transaction Volume Category')
+plt.title('Year-wise Distribution of Accounts Across Transaction Volumes')
+plt.xlabel('Year')
 plt.ylabel('Number of Accounts')
-
-plt.xticks(rotation=0)
+plt.legend(title='Transaction Volume Bins', bbox_to_anchor=(1.05, 1))
 plt.tight_layout()
 plt.show()
