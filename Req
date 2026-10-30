@@ -1,5 +1,32 @@
-1. Transaction and Spending Behaviour: Analyzes customers’ debit and credit amounts, average spending, transaction frequency, and the balance between money received and spent.
-2. Income and Cash-Flow Stability: Measures salary credits, the number of months with salary receipts, average monthly salary, income variability, and net cash flow.
-3. Bill and Payment Discipline: Tracks utility payments, NACH bounces, EMI reminders, and collection notices to understand payment patterns and potential repayment difficulties.
-4. Credit and Financial-Stress Indicators: Examines low-balance alerts, loan offers, BNPL transactions, refunds, and ATM withdrawals to identify patterns potentially relevant to financial stress.
-5. Digital and Temporal Behaviour: Analyzes UPI usage, merchant diversity, active days, late-night transactions, and payment channels to understand customers’ digital transaction habits.
+# Extract year and day type
+txn_df['Year'] = txn_df['Transaction_Date'].dt.year
+
+txn_df['Day_Type'] = txn_df['Transaction_Date'].dt.dayofweek.apply(
+    lambda x: 'Weekend' if x >= 5 else 'Weekday'
+)
+
+# Calculate daily transaction volume
+daily_volume = txn_df.groupby(
+    ['Year', 'Transaction_Date', 'Day_Type']
+)['Transaction_Amount'].sum().reset_index()
+
+# Calculate average daily volume
+q3_result = daily_volume.groupby(
+    ['Year', 'Day_Type']
+)['Transaction_Amount'].mean().unstack()
+
+print(q3_result)
+
+
+
+
+import matplotlib.pyplot as plt
+
+q3_result.plot(kind='bar', figsize=(12, 6))
+
+plt.title('Average Transaction Volume: Weekday vs Weekend')
+plt.xlabel('Year')
+plt.ylabel('Average Transaction Volume')
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
