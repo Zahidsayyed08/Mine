@@ -44,3 +44,14 @@ plt.ylabel('Number of Accounts')
 plt.xticks(rotation=0)
 plt.tight_layout()
 plt.show()
+
+
+account_balance = accepted_df.groupby('Account_ID').agg(
+    Total_Credit=('Credit', 'sum'),
+    Total_Debit=('Debit', 'sum')
+).reset_index()
+
+account_balance['Net_Balance'] = (
+    account_balance['Total_Credit'] -
+    account_balance['Total_Debit']
+)
