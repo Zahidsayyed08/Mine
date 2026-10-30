@@ -30,3 +30,59 @@ plt.ylabel('Average Transaction Volume')
 plt.xticks(rotation=45)
 plt.tight_layout()
 plt.show()
+
+
+
+# Count transactions per account
+account_transactions = txn_df.groupby('Account_ID').size()
+
+# Filter accounts with more than 30 transactions
+accounts_above_30 = account_transactions[
+    account_transactions > 30
+]
+
+# Count accounts
+total_accounts = accounts_above_30.count()
+
+print("Accounts with more than 30 transactions:", total_accounts)
+
+
+
+
+
+account_counts = txn_df.groupby('Account_ID').size().reset_index(
+    name='Transaction_Count'
+)
+
+
+bins = [0, 10, 20, 30, 50, 100, float('inf')]
+
+labels = ['1-10', '11-20', '21-30', '31-50', '51-100', 'Above 100']
+
+account_counts['Transaction_Range'] = pd.cut(
+    account_counts['Transaction_Count'],
+    bins=bins,
+    labels=labels
+)
+
+
+
+q5_result = account_counts['Transaction_Range'].value_counts(
+    sort=False
+)
+
+print(q5_result)
+
+
+
+plt.figure(figsize=(10, 6))
+
+q5_result.plot(kind='bar')
+
+plt.title('Distribution of Accounts Across Transaction Counts')
+plt.xlabel('Transaction Count Range')
+plt.ylabel('Number of Accounts')
+
+plt.xticks(rotation=0)
+plt.tight_layout()
+plt.show()
