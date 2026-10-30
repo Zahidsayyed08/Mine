@@ -1,101 +1,46 @@
-accepted_df = txn_df[
-    txn_df['Transaction_Status'].str.strip().str.lower() == 'accepted'
-].copy()
+# Dense rank: highest net balance gets rank 1
+account_balance['Rank'] = account_balance['Net_Balance'].rank(
+    method='dense',
+    ascending=False
+).astype(int)
+
+print(account_balance.head())
 
 
-credit_types = ['a_casac_txn', 'a_int_txn']
-
-debit_types = ['a_casad_txn', 'a_emi_pymt', 'a_tax_pymt']
-
-accepted_df['Credit'] = accepted_df.apply(
-    lambda row: row['Transaction_Amount']
-    if row['Transaction_Type'] in credit_types else 0,
-    axis=1
+account_balance['Decile'] = pd.qcut(
+    account_balance['Rank'],
+    q=5,
+    labels=[
+        'Decile 1',
+        'Decile 2',
+        'Decile 3',
+        'Decile 4',
+        'Decile 5'
+    ]
 )
 
-accepted_df['Debit'] = accepted_df.apply(
-    lambda row: row['Transaction_Amount']
-    if row['Transaction_Type'] in debit_types else 0,
-    axis=1
+q11_result = account_balance.groupby(
+    'Decile',
+    observed=False
+).agg(
+    Account_Count=('Account_ID', 'count'),
+    Average_Net_Balance=('Net_Balance', 'mean'),
+    Total_Net_Balance=('Net_Balance', 'sum')
 )
 
-
-q9_result = accepted_df.groupby('Account_ID').agg(
-    Total_Credit=('Credit', 'sum'),
-    Total_Debit=('Debit', 'sum')
-).reset_index()
-
-q9_result['Net_Balance'] = (
-    q9_result['Total_Credit'] - q9_result['Total_Debit']
-)
-
-print(q9_result.head())
-
-
-print("Total Credit:", q9_result['Total_Credit'].sum())
-
-print("Total Debit:", q9_result['Total_Debit'].sum())
-
-print("Total Net Balance:", q9_result['Net_Balance'].sum())
-
-
-
-
-import numpy as np
-
-narration = accepted_df['Transaction_Narration'].str.lower()
-
-conditions = [
-    narration.str.contains('brankas', na=False),
-    narration.str.contains('paynamics', na=False),
-    narration.str.contains('pesonet', na=False),
-    narration.str.contains('visa', na=False),
-    narration.str.contains('mastercard', na=False)
-]
-
-channels = [
-    'Brankas',
-    'Paynamics',
-    'Pesonet',
-    'Visa',
-    'Mastercard'
-]
-
-accepted_df['Channel'] = np.select(
-    conditions,
-    channels,
-    default='Other'
-)
-
-
-
-q10_result = accepted_df['Channel'].value_counts()
-
-print(q10_result)
-
-
-q10_summary = accepted_df.groupby('Channel').agg(
-    Accepted_Transactions=('Transaction_ID', 'count'),
-    Total_Transaction_Amount=('Transaction_Amount', 'sum')
-).reset_index()
-
-print(q10_summary)
-
+print(q11_result)
 
 
 import matplotlib.pyplot as plt
 
-q10_summary.plot(
-    x='Channel',
-    y='Accepted_Transactions',
+q11_result['Account_Count'].plot(
     kind='bar',
-    figsize=(10, 6),
-    legend=False
+    figsize=(10, 6)
 )
 
-plt.title('Accepted Transactions Across Different Channels')
-plt.xlabel('Transaction Channel')
-plt.ylabel('Number of Accepted Transactions')
+plt.title('Distribution of Accounts Across Net Balance Groups')
+plt.xlabel('Net Balance Groups')
+plt.ylabel('Number of Accounts')
 plt.xticks(rotation=0)
 plt.tight_layout()
 plt.show()
