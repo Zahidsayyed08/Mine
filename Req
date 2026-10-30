@@ -1,10 +1,29 @@
-# Dense rank: highest net balance gets rank 1
+credit_types = ['a_casac_txn', 'a_int_txn']
+
+debit_types = ['a_casad_txn', 'a_emi_pymt', 'a_tax_pymt']
+
+txn_df['Credit'] = txn_df['Transaction_Amount'].where(
+    txn_df['Transaction_Type'].isin(credit_types), 0
+)
+
+txn_df['Debit'] = txn_df['Transaction_Amount'].where(
+    txn_df['Transaction_Type'].isin(debit_types), 0
+)
+
+account_balance = txn_df.groupby('Account_ID').agg(
+    Total_Credit=('Credit', 'sum'),
+    Total_Debit=('Debit', 'sum')
+).reset_index()
+
+account_balance['Net_Balance'] = (
+    account_balance['Total_Credit'] -
+    account_balance['Total_Debit']
+)
+
 account_balance['Rank'] = account_balance['Net_Balance'].rank(
     method='dense',
     ascending=False
 ).astype(int)
-
-print(account_balance.head())
 
 
 account_balance['Decile'] = pd.qcut(
@@ -19,6 +38,7 @@ account_balance['Decile'] = pd.qcut(
     ]
 )
 
+
 q11_result = account_balance.groupby(
     'Decile',
     observed=False
@@ -29,29 +49,3 @@ q11_result = account_balance.groupby(
 )
 
 print(q11_result)
-
-
-import matplotlib.pyplot as plt
-
-q11_result['Account_Count'].plot(
-    kind='bar',
-    figsize=(10, 6)
-)
-
-plt.title('Distribution of Accounts Across Net Balance Groups')
-plt.xlabel('Net Balance Groups')
-plt.ylabel('Number of Accounts')
-plt.xticks(rotation=0)
-plt.tight_layout()
-plt.show()
-
-
-account_balance = accepted_df.groupby('Account_ID').agg(
-    Total_Credit=('Credit', 'sum'),
-    Total_Debit=('Debit', 'sum')
-).reset_index()
-
-account_balance['Net_Balance'] = (
-    account_balance['Total_Credit'] -
-    account_balance['Total_Debit']
-)
