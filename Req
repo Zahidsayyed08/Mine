@@ -1,35 +1,30 @@
+import numpy as np
 
-# Account-level net balance
-account_balance = (
-    txn_df.groupby("Account_ID")["Net_Balance"]
-    .first()
-    .reset_index()
+# Convert narration to lowercase
+narration = txn_df['Transaction_Narration'].str.lower()
+
+# Identify transaction channel
+conditions = [
+    narration.str.contains('brankas|brancask', na=False),
+    narration.str.contains('paynamics', na=False),
+    narration.str.contains('pesonet', na=False),
+    narration.str.contains('visa', na=False),
+    narration.str.contains('mastercard', na=False)
+]
+
+choices = [
+    'Brankas',
+    'Paynamics',
+    'Pesonet',
+    'Visa',
+    'Mastercard'
+]
+
+# Create new column
+txn_df['Transaction Channel'] = np.select(
+    conditions,
+    choices,
+    default='Other'
 )
 
-# Dense ranking: highest balance gets rank 1
-account_balance["Rank"] = (
-    account_balance["Net_Balance"]
-    .rank(method="dense", ascending=False)
-)
-
-# Assign 5 deciles
-account_balance["Decile"] = pd.qcut(
-    account_balance["Rank"].rank(method="first", ascending=True),
-    q=5,
-    labels=[1, 2, 3, 4, 5]
-)
-
-# Decile distribution
-decile_distribution = (
-    account_balance.groupby("Decile", observed=False)
-    .agg(
-        Number_of_Accounts=("Account_ID", "count"),
-        Min_Net_Balance=("Net_Balance", "min"),
-        Max_Net_Balance=("Net_Balance", "max")
-    )
-    .reset_index()
-)
-
-print(account_balance.head())
-print(decile_distribution)
 
