@@ -1,30 +1,79 @@
-import numpy as np
 
-# Convert narration to lowercase
-narration = txn_df['Transaction_Narration'].str.lower()
+txn_df['Transaction_Date'] = pd.to_datetime(
+    txn_df['Transaction_Date'],
+    dayfirst=True
+)
 
-# Identify transaction channel
-conditions = [
-    narration.str.contains('brankas|brancask', na=False),
-    narration.str.contains('paynamics', na=False),
-    narration.str.contains('pesonet', na=False),
-    narration.str.contains('visa', na=False),
-    narration.str.contains('mastercard', na=False)
+last_txn = (
+    txn_df.groupby('Account_ID')['Transaction_Date']
+    .max()
+    .reset_index()
+)
+
+last_txn.columns = ['Account_ID', 'Last_Transaction_Date']
+
+print(last_txn.head())
+
+
+
+reference_date = txn_df['Transaction_Date'].max()
+
+last_txn['Days_Since_Last_Transaction'] = (
+    reference_date - last_txn['Last_Transaction_Date']
+).dt.days
+
+
+bins = [
+    -1, 100, 300, 600, 900,
+    1200, 2000, 3000, 5000, float('inf')
 ]
 
-choices = [
-    'Brankas',
-    'Paynamics',
-    'Pesonet',
-    'Visa',
-    'Mastercard'
+labels = [
+    '0-100',
+    '100-300',
+    '300-600',
+    '600-900',
+    '900-1200',
+    '1200-2000',
+    '2000-3000',
+    '3000-5000',
+    '5000+'
 ]
 
-# Create new column
-txn_df['Transaction Channel'] = np.select(
-    conditions,
-    choices,
-    default='Other'
+last_txn['Days_Bin'] = pd.cut(
+    last_txn['Days_Since_Last_Transaction'],
+    bins=bins,
+    labels=labels
 )
 
 
+dashboard = (
+    last_txn['Days_Bin']
+    .value_counts(sort=False)
+    .reset_index()
+)
+
+dashboard.columns = [
+    'Days Since Last Transaction',
+    'Account Count'
+]
+
+print(dashboard)
+
+
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(12, 6))
+
+plt.bar(
+    dashboard['Days Since Last Transaction'].astype(str),
+    dashboard['Account Count']
+)
+
+plt.title('Account-Level Days Since Last Transaction')
+plt.xlabel('Days Since Last Transaction')
+plt.ylabel('Number of Accounts')
+
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
