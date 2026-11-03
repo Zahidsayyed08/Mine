@@ -1,76 +1,417 @@
-account_region = (
-    cli_df[['Account_ID', 'Client_ID', 'Region']]
-    .drop_duplicates(subset='Account_ID')
-)
+
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+from threading import Timer
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+import time
+
+# ==========================================
+# 1. FILE PATHS
+# ==========================================
+
+FOLDER = Path(__file__).resolve().parent
+
+OUTPUT_FILE = FOLDER / "Automated_Dashboards.xlsx"
+
+def get_file(pattern):
+    files = [
+        f for f in FOLDER.glob(pattern)
+        if not f.name.startswith("~$")
+    ]
+
+    if len(files) != 1:
+        raise FileNotFoundError(
+            f"Expected one file matching {pattern}, found: {files}"
+        )
+
+    return files[0]
 
 
+# ==========================================
+# 2. MAIN DASHBOARD FUNCTION
+# ==========================================
 
-total_customers = (
-    cli_df.groupby('Region')['Client_ID']
-    .nunique()
-    .reset_index(name='# Customers')
-)
+def create_dashboards():
 
-total_accounts = (
-    acc_df.groupby('Account_ID')
-    .first()
-    .reset_index()[['Account_ID']]
-    .merge(
-        account_region[['Account_ID', 'Region']],
+    print("\nReading latest Excel data...")
+
+    acc_df = pd.read_excel(get_file("Acc_level_Data*.xlsx"))
+    txn_df = pd.read_excel(get_file("Txn_level_Data*.xlsx"))
+    cli_df = pd.read_excel(get_file("Client_level_data*.xlsx"))
+
+    # Clean column names
+    for df in [acc_df, txn_df, cli_df]:
+        df.columns = df.columns.str.strip()
+
+    # ======================================
+    # DASHBOARD 1
+    # Days since last transaction vs
+    # Days to activation
+    # ======================================
+
+    acc_df['Days from Last Transaction'] = pd.to_numeric(
+        acc_df['Days from Last Transaction'],
+        errors='coerce'
+    )
+
+    acc_df['Days to Activation'] = pd.to_numeric(
+        acc_df['Days to Activation'],
+        errors='coerce'
+    )
+
+    acc_df['Days_Last_Bin'] = pd.cut(
+        acc_df['Days from Last Transaction'],
+        bins=[-np.inf, 30, 60, 90, np.inf],
+        labels=['0-30 Days', '31-60 Days',
+                '61-90 Days', '90 + Days']
+    )
+
+    acc_df['Activation_Bin'] = pd.cut(
+        acc_df['Days to Activation'],
+        bins=[-np.inf, 5, 10, 20, 30, np.inf],
+        labels=['0-5 Days', '5-10 Days',
+                '10-20 Days', '20-30 Days', '30+ Days']
+    )
+
+    dashboard_1 = pd.crosstab(
+        acc_df['Days_Last_Bin'],
+        acc_df['Activation_Bin']
+    )
+
+    dashboard_1 = dashboard_1.reindex(
+        index=['0-30 Days', '31-60 Days',
+               '61-90 Days', '90 + Days'],
+        columns=['0-5 Days', '5-10 Days',
+                 '10-20 Days', '20-30 Days', '30+ Days'],
+        fill_value=0
+    )
+
+    dashboard_1.index.name = 'Days since last Transaction'
+    dashboard_1.columns.name = 'Days to Activation'
+
+    dashboard_1 = dashboard_1.reset_index()
+
+    # ======================================
+    # DASHBOARD 2
+    # Region-wise customers, accounts,
+    # and channel-wise transactions
+    # ======================================
+
+    # Account to region mapping
+    account_region = (
+        cli_df[['Account_ID', 'Region']]
+        .dropna(subset=['Account_ID'])
+        .drop_duplicates('Account_ID')
+    )
+
+    # Total customers
+    customers = (
+        cli_df.groupby('Region')['Client_ID']
+        .nunique()
+        .reset_index(name='# Customers')
+    )
+
+    # Total accounts
+    accounts = (
+        account_region.groupby('Region')['Account_ID']
+        .nunique()
+        .reset_index(name='# Accounts')
+    )
+
+    # Map region to transactions
+    txn_region = txn_df.merge(
+        account_region,
         on='Account_ID',
         how='left'
     )
-    .groupby('Region')['Account_ID']
-    .nunique()
-    .reset_index(name='# Accounts')
-)
 
-
-txn_region = txn_df.merge(
-    account_region[['Account_ID', 'Region']],
-    on='Account_ID',
-    how='left'
-)
-
-dashboard_channel = pd.crosstab(
-    txn_region['Region'],
-    txn_region['Transaction_Channel']
-)
-
-channels = [
-    'Branches',
-    'Paynamics',
-    'Pesonet',
-    'Visa',
-    'Mastercard'
-]
-
-dashboard_channel = dashboard_channel.reindex(
-    columns=channels,
-    fill_value=0
-)
-
-dashboard_channel.columns = [
-    '# Transactions ' + col for col in dashboard_channel.columns
-]
-
-dashboard_9 = (
-    total_customers
-    .merge(total_accounts, on='Region', how='outer')
-    .merge(
-        dashboard_channel.reset_index(),
-        on='Region',
-        how='outer'
+    # Clean transaction channels
+    txn_region['Transaction_Channel'] = (
+        txn_region['Transaction_Channel']
+        .astype(str)
+        .str.strip()
+        .str.lower()
     )
-)
 
-# Replace missing values with zero
-dashboard_9 = dashboard_9.fillna(0)
+    # Standardize channel names
+    channel_mapping = {
+        'branch': 'Branches',
+        'branches': 'Branches',
+        'paynamics': 'Paynamics',
+        'pesonet': 'Pesonet',
+        'visa': 'Visa',
+        'mastercard': 'Mastercard'
+    }
 
-# Convert all count columns to integer
-count_cols = dashboard_9.columns.drop('Region')
+    txn_region['Channel'] = (
+        txn_region['Transaction_Channel']
+        .map(channel_mapping)
+    )
 
-dashboard_9[count_cols] = dashboard_9[count_cols].astype(int)
+    channels = [
+        'Branches', 'Paynamics', 'Pesonet',
+        'Visa', 'Mastercard'
+    ]
 
-# Display final dashboard
-dashboard_9
+    # Count transactions channel-wise
+    channel_counts = pd.crosstab(
+        txn_region['Region'],
+        txn_region['Channel']
+    )
+
+    channel_counts = channel_counts.reindex(
+        columns=channels,
+        fill_value=0
+    )
+
+    channel_counts = channel_counts.reset_index()
+
+    # Combine all data
+    dashboard_2 = (
+        customers
+        .merge(accounts, on='Region', how='outer')
+        .merge(channel_counts, on='Region', how='outer')
+        .fillna(0)
+    )
+
+    count_columns = [
+        '# Customers', '# Accounts'
+    ] + channels
+
+    dashboard_2[count_columns] = (
+        dashboard_2[count_columns].astype(int)
+    )
+
+    # ======================================
+    # 3. CREATE EXCEL WORKBOOK
+    # ======================================
+
+    with pd.ExcelWriter(
+        OUTPUT_FILE,
+        engine='openpyxl'
+    ) as writer:
+
+        dashboard_1.to_excel(
+            writer,
+            sheet_name='Dashboards',
+            index=False,
+            startrow=2
+        )
+
+        start2 = len(dashboard_1) + 7
+
+        dashboard_2.to_excel(
+            writer,
+            sheet_name='Dashboards',
+            index=False,
+            startrow=start2 + 1
+        )
+
+    # ======================================
+    # 4. EXCEL FORMATTING
+    # ======================================
+
+    wb = load_workbook(OUTPUT_FILE)
+    ws = wb['Dashboards']
+
+    dark_fill = PatternFill(
+        'solid', fgColor='21152F'
+    )
+
+    title_fill = PatternFill(
+        'solid', fgColor='35204B'
+    )
+
+    white_font = Font(
+        bold=True, color='FFFFFF', size=11
+    )
+
+    title_font = Font(
+        bold=True, color='FFFFFF', size=14
+    )
+
+    border = Border(
+        left=Side(style='thin', color='B7B7B7'),
+        right=Side(style='thin', color='B7B7B7'),
+        top=Side(style='thin', color='B7B7B7'),
+        bottom=Side(style='thin', color='B7B7B7')
+    )
+
+    # Dashboard 1 title
+    ws.merge_cells('A1:F1')
+    ws['A1'] = 'DASHBOARD NO. 1'
+    ws['A1'].fill = title_fill
+    ws['A1'].font = title_font
+
+    # Dashboard 2 title
+    start2 = len(dashboard_1) + 7
+    header2 = start2 + 2
+
+    ws.merge_cells(
+        start_row=start2,
+        start_column=1,
+        end_row=start2,
+        end_column=8
+    )
+
+    ws.cell(start2, 1, 'DASHBOARD NO. 2')
+    ws.cell(start2, 1).fill = title_fill
+    ws.cell(start2, 1).font = title_font
+
+    # Merge transaction channel heading
+    ws.merge_cells(
+        start_row=header2,
+        start_column=4,
+        end_row=header2,
+        end_column=8
+    )
+
+    ws.cell(
+        header2, 4, '# Transactions (Channelwise)'
+    )
+
+    # Format both table headers
+    for row in [3, header2 + 1]:
+
+        for cell in ws[row]:
+            if cell.column <= 8:
+                cell.fill = dark_fill
+                cell.font = white_font
+                cell.alignment = Alignment(
+                    horizontal='center',
+                    vertical='center',
+                    wrap_text=True
+                )
+                cell.border = border
+
+    # Format merged header
+    for col in range(1, 9):
+        cell = ws.cell(header2, col)
+        cell.fill = dark_fill
+        cell.font = white_font
+        cell.alignment = Alignment(
+            horizontal='center',
+            vertical='center',
+            wrap_text=True
+        )
+        cell.border = border
+
+    # Format all table data cells
+    for row in ws.iter_rows(
+        min_row=1,
+        max_row=ws.max_row,
+        min_col=1,
+        max_col=8
+    ):
+        for cell in row:
+            if cell.value is not None:
+                cell.border = border
+
+    # Column widths
+    widths = {
+        'A': 35,
+        'B': 16,
+        'C': 16,
+        'D': 16,
+        'E': 16,
+        'F': 16,
+        'G': 16,
+        'H': 16
+    }
+
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+
+    ws.freeze_panes = 'B4'
+
+    wb.save(OUTPUT_FILE)
+
+    print("\nSUCCESS! Both dashboards updated.")
+    print("Output:", OUTPUT_FILE)
+
+
+# ==========================================
+# 5. AUTOMATIC FILE MONITORING
+# ==========================================
+
+class ExcelMonitor(FileSystemEventHandler):
+
+    def __init__(self):
+        self.timer = None
+
+    def on_any_event(self, event):
+
+        if event.is_directory:
+            return
+
+        filename = Path(event.src_path).name
+
+        if filename.startswith('~$'):
+            return
+
+        if filename == OUTPUT_FILE.name:
+            return
+
+        if filename.lower().endswith('.xlsx'):
+
+            if self.timer:
+                self.timer.cancel()
+
+            # Wait until Excel finishes saving
+            self.timer = Timer(
+                3,
+                self.update_dashboard
+            )
+
+            self.timer.start()
+
+    def update_dashboard(self):
+
+        try:
+            create_dashboards()
+
+        except Exception as e:
+            print("\nERROR:", e)
+            print("Check source files and column names.")
+
+
+# ==========================================
+# 6. START AUTOMATION
+# ==========================================
+
+if __name__ == '__main__':
+
+    # Initial dashboard creation
+    create_dashboards()
+
+    # Start monitoring folder
+    event_handler = ExcelMonitor()
+
+    observer = Observer()
+
+    observer.schedule(
+        event_handler,
+        str(FOLDER),
+        recursive=False
+    )
+
+    observer.start()
+
+    print("\nAUTOMATION STARTED!")
+    print("Monitoring folder:", FOLDER)
+    print("Edit any source Excel file to refresh dashboards.")
+    print("Press CTRL + C to stop.")
+
+    try:
+        while True:
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        observer.stop()
+        print("\nAutomation stopped.")
+
+    observer.join()
