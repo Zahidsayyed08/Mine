@@ -1,66 +1,83 @@
 import pandas as pd
 import numpy as np
 
-# Convert KYC Date into datetime
-acc_df['KYC_date'] = pd.to_datetime(
-    acc_df['KYC_date'], errors='coerce'
+# Rank ADB in descending order
+acc_df['ADB_Rank'] = acc_df['ADB_Jan2022'].rank(
+    method='first',
+    ascending=False
 )
 
-# Normalize categorical columns
-acc_df['KYC Status'] = acc_df['KYC Status'].astype(str).str.strip().str.upper()
-
-acc_df['CDD Status'] = acc_df['CDD Status'].astype(str).str.strip().str.upper()
-
-acc_df['FRM Status'] = pd.to_numeric(
-    acc_df['FRM Status'], errors='coerce'
+# Divide into 5 groups
+acc_df['ADB_Decile'] = pd.qcut(
+    acc_df['ADB_Rank'],
+    q=5,
+    labels=[
+        'ADB Balance Decile 1',
+        'ADB Balance Decile 2',
+        'ADB Balance Decile 3',
+        'ADB Balance Decile 4',
+        'ADB Balance Decile 5'
+    ]
 )
 
-# Today's date
-today = pd.Timestamp.today().normalize()
+# Check output
+acc_df[
+    ['Account_ID', 'ADB_Jan2022', 'ADB_Rank', 'ADB_Decile']
+].head(20)
 
-# Default CDD Due Date
-acc_df['CDD Due Date'] = pd.NaT
 
-# Active account conditions
-conditions = [
-    (acc_df['KYC Status'] == 'ACTIVE') &
-    (acc_df['CDD Status'] == 'SDD') &
-    (acc_df['FRM Status'] == 0),
+dashboard_accounts = pd.crosstab(
+    acc_df['ADB_Decile'],
+    acc_df['CDD Status']
+)
 
-    (acc_df['KYC Status'] == 'ACTIVE') &
-    (acc_df['CDD Status'] == 'SDD') &
-    (acc_df['FRM Status'] == 1),
+# Keep required order
+dashboard_accounts = dashboard_accounts.reindex(
+    index=[
+        'ADB Balance Decile 1',
+        'ADB Balance Decile 2',
+        'ADB Balance Decile 3',
+        'ADB Balance Decile 4',
+        'ADB Balance Decile 5'
+    ],
+    columns=['SDD', 'EDD', 'MEDD'],
+    fill_value=0
+)
 
-    (acc_df['KYC Status'] == 'ACTIVE') &
-    (acc_df['CDD Status'] == 'EDD') &
-    (acc_df['FRM Status'] == 0),
+dashboard_accounts.index.name = 'ADB Balance'
+dashboard_accounts.columns.name = None
 
-    (acc_df['KYC Status'] == 'ACTIVE') &
-    (acc_df['CDD Status'] == 'EDD') &
-    (acc_df['FRM Status'] == 1),
+dashboard_accounts
 
-    (acc_df['KYC Status'] == 'ACTIVE') &
-    (acc_df['CDD Status'] == 'MEDD') &
-    (acc_df['FRM Status'] == 0),
 
-    (acc_df['KYC Status'] == 'ACTIVE') &
-    (acc_df['CDD Status'] == 'MEDD') &
-    (acc_df['FRM Status'] == 1)
-]
+# Merge account-level information into transaction data
 
-# Corresponding years
-years = [5, 4, 4, 3, 2, 1]
+txn_df = txn_df.merge(
+    acc_df[['Account_ID', 'ADB_Decile', 'CDD Status']],
+    on='Account_ID',
+    how='left'
+)
 
-# Calculate due dates
-for condition, year in zip(conditions, years):
+# Count transactions
+dashboard_transactions = pd.crosstab(
+    txn_df['ADB_Decile'],
+    txn_df['CDD Status']
+)
 
-    acc_df.loc[condition, 'CDD Due Date'] = (
-        acc_df.loc[condition, 'KYC_date']
-        + pd.DateOffset(years=year)
-    )
+# Keep required order
+dashboard_transactions = dashboard_transactions.reindex(
+    index=[
+        'ADB Balance Decile 1',
+        'ADB Balance Decile 2',
+        'ADB Balance Decile 3',
+        'ADB Balance Decile 4',
+        'ADB Balance Decile 5'
+    ],
+    columns=['SDD', 'EDD', 'MEDD'],
+    fill_value=0
+)
 
-# Dormant and Expired accounts: Due today
-acc_df.loc[
-    acc_df['KYC Status'].isin(['DORMANT', 'EXPIRED']),
-    'CDD Due Date'
-] = today
+dashboard_transactions.index.name = 'ADB Balance'
+dashboard_transactions.columns.name = None
+
+dashboard_transactions
