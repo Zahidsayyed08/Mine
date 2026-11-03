@@ -1,171 +1,66 @@
 import pandas as pd
 import numpy as np
 
-# --------------------------------
-# 1. Calculate PPC
-# --------------------------------
-
-ppc_df = (
-    txn_df.groupby('Account_ID')['Transaction_Amount']
-    .mean()
-    .reset_index()
+# Convert KYC Date into datetime
+acc_df['KYC_date'] = pd.to_datetime(
+    acc_df['KYC_date'], errors='coerce'
 )
 
-ppc_df.rename(
-    columns={'Transaction_Amount': 'PPC'},
-    inplace=True
+# Normalize categorical columns
+acc_df['KYC Status'] = acc_df['KYC Status'].astype(str).str.strip().str.upper()
+
+acc_df['CDD Status'] = acc_df['CDD Status'].astype(str).str.strip().str.upper()
+
+acc_df['FRM Status'] = pd.to_numeric(
+    acc_df['FRM Status'], errors='coerce'
 )
 
-# --------------------------------
-# 2. Calculate EOP
-# --------------------------------
+# Today's date
+today = pd.Timestamp.today().normalize()
 
-balance_cols = [
-    col for col in acc_df.columns
-    if col.startswith('Balance_')
-    and col.replace('Balance_', '').isdigit()
+# Default CDD Due Date
+acc_df['CDD Due Date'] = pd.NaT
+
+# Active account conditions
+conditions = [
+    (acc_df['KYC Status'] == 'ACTIVE') &
+    (acc_df['CDD Status'] == 'SDD') &
+    (acc_df['FRM Status'] == 0),
+
+    (acc_df['KYC Status'] == 'ACTIVE') &
+    (acc_df['CDD Status'] == 'SDD') &
+    (acc_df['FRM Status'] == 1),
+
+    (acc_df['KYC Status'] == 'ACTIVE') &
+    (acc_df['CDD Status'] == 'EDD') &
+    (acc_df['FRM Status'] == 0),
+
+    (acc_df['KYC Status'] == 'ACTIVE') &
+    (acc_df['CDD Status'] == 'EDD') &
+    (acc_df['FRM Status'] == 1),
+
+    (acc_df['KYC Status'] == 'ACTIVE') &
+    (acc_df['CDD Status'] == 'MEDD') &
+    (acc_df['FRM Status'] == 0),
+
+    (acc_df['KYC Status'] == 'ACTIVE') &
+    (acc_df['CDD Status'] == 'MEDD') &
+    (acc_df['FRM Status'] == 1)
 ]
 
-# Sort balance columns by date
-balance_cols = sorted(balance_cols)
+# Corresponding years
+years = [5, 4, 4, 3, 2, 1]
 
-# Latest available balance column
-latest_balance_col = balance_cols[-1]
+# Calculate due dates
+for condition, year in zip(conditions, years):
 
-acc_df['EOP'] = pd.to_numeric(
-    acc_df[latest_balance_col], errors='coerce'
-)
-
-# --------------------------------
-# 3. Merge PPC into account data
-# --------------------------------
-
-acc_df = acc_df.merge(
-    ppc_df,
-    on='Account_ID',
-    how='left'
-)
-
-acc_df['PPC'] = acc_df['PPC'].fillna(0)
-
-
-
-# Days since last transaction
-
-acc_df['Days from Last Transaction'] = pd.to_numeric(
-    acc_df['Days from Last Transaction'],
-    errors='coerce'
-)
-
-acc_df['Bins of Days from Last Transaction'] = pd.cut(
-    acc_df['Days from Last Transaction'],
-    bins=[-np.inf, 30, 60, 90, np.inf],
-    labels=['0-30 Days', '31-60 Days', '61-90 Days', '90 + Days']
-)
-
-# Days to activation
-
-acc_df['Days to Activation'] = pd.to_numeric(
-    acc_df['Days to Activation'],
-    errors='coerce'
-)
-
-acc_df['Bins of Days to Activation'] = pd.cut(
-    acc_df['Days to Activation'],
-    bins=[-np.inf, 5, 10, 20, 30, np.inf],
-    labels=['0-5 Days', '5-10 Days', '10-20 Days',
-            '20-30 Days', '30+ Days']
-)
-
-
-dashboard_1a = (
-    acc_df.groupby(
-        'Bins of Days from Last Transaction',
-        observed=False
+    acc_df.loc[condition, 'CDD Due Date'] = (
+        acc_df.loc[condition, 'KYC_date']
+        + pd.DateOffset(years=year)
     )
-    .agg(
-        **{
-            '# Accounts': ('Account_ID', 'nunique'),
-            '# Transactions': ('Number of Transactions', 'sum'),
-            'Average PPC': ('PPC', 'mean'),
-            'Average EOP Balance (last 30 Days)': ('EOP', 'mean')
-        }
-    )
-    .reset_index()
-)
 
-dashboard_1a.rename(
-    columns={
-        'Bins of Days from Last Transaction':
-        'Days Since Last Transaction'
-    },
-    inplace=True
-)
-
-dashboard_1a
-
-
-dashboard_1b = (
-    acc_df.groupby(
-        'Bins of Days to Activation',
-        observed=False
-    )
-    .agg(
-        **{
-            '# Accounts': ('Account_ID', 'nunique'),
-            'Average EOP Balance (last 30 Days)': ('EOP', 'mean')
-        }
-    )
-    .reset_index()
-)
-
-dashboard_1b.rename(
-    columns={
-        'Bins of Days to Activation': 'Days to Activation'
-    },
-    inplace=True
-)
-
-dashboard_1b
-
-
-
-dashboard_1c = pd.crosstab(
-    acc_df['Bins of Days from Last Transaction'],
-    acc_df['Bins of Days to Activation'],
-    dropna=False
-)
-
-# Ensure all required rows and columns are displayed
-
-dashboard_1c = dashboard_1c.reindex(
-    index=[
-        '0-30 Days',
-        '31-60 Days',
-        '61-90 Days',
-        '90 + Days'
-    ],
-    columns=[
-        '0-5 Days',
-        '5-10 Days',
-        '10-20 Days',
-        '20-30 Days',
-        '30+ Days'
-    ],
-    fill_value=0
-)
-
-dashboard_1c.index.name = 'Days since last Transaction'
-dashboard_1c.columns.name = 'Days to Activation'
-
-dashboard_1c
-
-
-print("========== DASHBOARD 1(a) ==========")
-display(dashboard_1a)
-
-print("========== DASHBOARD 1(b) ==========")
-display(dashboard_1b)
-
-print("========== DASHBOARD 1(c) ==========")
-display(dashboard_1c)
+# Dormant and Expired accounts: Due today
+acc_df.loc[
+    acc_df['KYC Status'].isin(['DORMANT', 'EXPIRED']),
+    'CDD Due Date'
+] = today
