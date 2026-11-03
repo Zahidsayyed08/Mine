@@ -1,105 +1,76 @@
-# Remove duplicate client records
-client_kyc = cli_df[
-    ['Client_ID', 'Region', 'KYC_Status']
-].drop_duplicates()
-
-# Create cross-tab
-dashboard_7 = pd.crosstab(
-    client_kyc['Region'],
-    client_kyc['KYC_Status']
+account_region = (
+    cli_df[['Account_ID', 'Client_ID', 'Region']]
+    .drop_duplicates(subset='Account_ID')
 )
-
-# Keep required column order
-dashboard_7 = dashboard_7.reindex(
-    columns=['Active', 'Dormant', 'Expired'],
-    fill_value=0
-)
-
-# Display
-dashboard_7
-
-
-
-
-
-
-# Remove duplicate client records
-client_cdd = cli_df[
-    ['Client_ID', 'Region', 'CDD_Status']
-].drop_duplicates()
-
-# Create cross-tab
-dashboard_8 = pd.crosstab(
-    client_cdd['Region'],
-    client_cdd['CDD_Status']
-)
-
-# Keep required column order
-dashboard_8 = dashboard_8.reindex(
-    columns=['SDD', 'EDD', 'MEDD'],
-    fill_value=0
-)
-
-# Display
-dashboard_8
-
-
 
 
 
 total_customers = (
     cli_df.groupby('Region')['Client_ID']
     .nunique()
-    .reset_index(name='Total Customers')
+    .reset_index(name='# Customers')
 )
+
 total_accounts = (
-    acc_df.merge(
-        cli_df[['Account_ID', 'Region']].drop_duplicates('Account_ID'),
+    acc_df.groupby('Account_ID')
+    .first()
+    .reset_index()[['Account_ID']]
+    .merge(
+        account_region[['Account_ID', 'Region']],
         on='Account_ID',
         how='left'
     )
     .groupby('Region')['Account_ID']
     .nunique()
-    .reset_index(name='Total Accounts')
-)
-# Create account-region mapping
-account_region = (
-    cli_df[['Account_ID', 'Region']]
-    .drop_duplicates('Account_ID')
+    .reset_index(name='# Accounts')
 )
 
-# Merge region into transaction data
+
 txn_region = txn_df.merge(
-    account_region,
+    account_region[['Account_ID', 'Region']],
     on='Account_ID',
     how='left'
 )
 
-# Count transactions region-wise
-total_transactions = (
-    txn_region.groupby('Region')
-    .size()
-    .reset_index(name='Total Transactions')
+dashboard_channel = pd.crosstab(
+    txn_region['Region'],
+    txn_region['Transaction_Channel']
 )
+
+channels = [
+    'Branches',
+    'Paynamics',
+    'Pesonet',
+    'Visa',
+    'Mastercard'
+]
+
+dashboard_channel = dashboard_channel.reindex(
+    columns=channels,
+    fill_value=0
+)
+
+dashboard_channel.columns = [
+    '# Transactions ' + col for col in dashboard_channel.columns
+]
+
 dashboard_9 = (
     total_customers
     .merge(total_accounts, on='Region', how='outer')
-    .merge(total_transactions, on='Region', how='outer')
+    .merge(
+        dashboard_channel.reset_index(),
+        on='Region',
+        how='outer'
+    )
 )
 
 # Replace missing values with zero
 dashboard_9 = dashboard_9.fillna(0)
 
-# Convert counts to integer
-count_cols = [
-    'Total Customers',
-    'Total Accounts',
-    'Total Transactions'
-]
+# Convert all count columns to integer
+count_cols = dashboard_9.columns.drop('Region')
 
-dashboard_9[count_cols] = (
-    dashboard_9[count_cols].astype(int)
-)
+dashboard_9[count_cols] = dashboard_9[count_cols].astype(int)
 
+# Display final dashboard
 dashboard_9
-
