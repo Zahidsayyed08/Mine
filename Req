@@ -1,89 +1,132 @@
-# Convert account opening date to datetime
-acc_df['Account_opn_Date'] = pd.to_datetime(
-    acc_df['Account_opn_Date'],
-    errors='coerce'
-)
-
-# Map Account_ID to Client_ID
+# Create Account_ID and Client_ID mapping
 account_client = cli_df[
     ['Account_ID', 'Client_ID']
 ].drop_duplicates()
 
-# Merge Client_ID into account dataframe
-temp_df = acc_df.merge(
+# Merge account-level CDD status with Client_ID
+temp_df = acc_df[
+    ['Account_ID', 'CDD Status']
+].merge(
     account_client,
     on='Account_ID',
     how='left'
 )
 
-# Calculate minimum account opening date per client
-client_open = (
-    temp_df.groupby('Client_ID')['Account_opn_Date']
-    .min()
-    .reset_index()
-)
-
-client_open.rename(
-    columns={'Account_opn_Date': 'Client_Open_Date'},
-    inplace=True
-)
-
-# Update cli_df
-cli_df = cli_df.drop(
-    columns=['Client_Open_Date'],
-    errors='ignore'
-)
-
-cli_df = cli_df.merge(
-    client_open,
-    on='Client_ID',
-    how='left'
-)
-
-
-
-# Convert names to string and handle missing values
-name_cols = ['first_name', 'middle_name', 'last_name']
-
-for col in name_cols:
-    cli_df[col] = cli_df[col].fillna('').astype(str).str.strip()
-
-# Join names and remove extra spaces
-cli_df['Client_Full_Name'] = (
-    cli_df[name_cols]
-    .agg(' '.join, axis=1)
-    .str.replace(r'\s+', ' ', regex=True)
+# Clean CDD Status
+temp_df['CDD Status'] = (
+    temp_df['CDD Status']
+    .astype(str)
     .str.strip()
+    .str.upper()
 )
 
+# Function to calculate client CDD status
+def get_cdd_status(x):
 
-# Convert CDD Due Date into datetime
-acc_df['CDD Due Date'] = pd.to_datetime(
-    acc_df['CDD Due Date'],
-    errors='coerce'
-)
+    if 'MEDD' in x.values:
+        return 'MEDD'
 
-# Calculate minimum CDD Due Date per client
-client_cdd = (
-    temp_df.assign(
-        CDD_Due_Date=pd.to_datetime(
-            temp_df['CDD Due Date'],
-            errors='coerce'
-        )
-    )
-    .groupby('Client_ID')['CDD_Due_Date']
-    .min()
-    .reset_index()
+    elif 'EDD' in x.values:
+        return 'EDD'
+
+    else:
+        return 'SDD'
+
+
+# Calculate CDD Status at Client level
+client_cdd_status = (
+    temp_df.groupby('Client_ID')['CDD Status']
+    .apply(get_cdd_status)
+    .reset_index(name='CDD_Status')
 )
 
 # Update cli_df
 cli_df = cli_df.drop(
-    columns=['CDD_Due_Date'],
+    columns=['CDD_Status'],
     errors='ignore'
 )
 
 cli_df = cli_df.merge(
-    client_cdd,
+    client_cdd_status,
     on='Client_ID',
     how='left'
 )
+
+
+
+# Merge account-level KYC status with Client_ID
+temp_kyc = acc_df[
+    ['Account_ID', 'KYC Status']
+].merge(
+    account_client,
+    on='Account_ID',
+    how='left'
+)
+
+# Clean KYC Status
+temp_kyc['KYC Status'] = (
+    temp_kyc['KYC Status']
+    .astype(str)
+    .str.strip()
+    .str.upper()
+)
+
+# Function to calculate client KYC status
+def get_kyc_status(x):
+
+    if 'ACTIVE' in x.values:
+        return 'Active'
+
+    elif 'DORMANT' in x.values:
+        return 'Dormant'
+
+    else:
+        return 'Expired'
+
+
+# Calculate KYC Status at Client level
+client_kyc_status = (
+    temp_kyc.groupby('Client_ID')['KYC Status']
+    .apply(get_kyc_status)
+    .reset_index(name='KYC_Status')
+)
+
+# Update cli_df
+cli_df = cli_df.drop(
+    columns=['KYC_Status'],
+    errors='ignore'
+)
+
+cli_df = cli_df.merge(
+    client_kyc_status,
+    on='Client_ID',
+    how='left'
+)
+
+
+
+
+
+# Count unique accounts for each client
+client_ppc = (
+    account_client.groupby('Client_ID')['Account_ID']
+    .nunique()
+    .reset_index(name='PPC')
+)
+
+# Update cli_df
+cli_df = cli_df.drop(
+    columns=['PPC'],
+    errors='ignore'
+)
+
+cli_df = cli_df.merge(
+    client_ppc,
+    on='Client_ID',
+    how='left'
+)
+
+cli_df['PPC'] = cli_df['PPC'].fillna(0).astype(int)
+
+
+
