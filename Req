@@ -1,79 +1,171 @@
+import pandas as pd
+import numpy as np
 
-txn_df['Transaction_Date'] = pd.to_datetime(
-    txn_df['Transaction_Date'],
-    dayfirst=True
-)
+# --------------------------------
+# 1. Calculate PPC
+# --------------------------------
 
-last_txn = (
-    txn_df.groupby('Account_ID')['Transaction_Date']
-    .max()
+ppc_df = (
+    txn_df.groupby('Account_ID')['Transaction_Amount']
+    .mean()
     .reset_index()
 )
 
-last_txn.columns = ['Account_ID', 'Last_Transaction_Date']
+ppc_df.rename(
+    columns={'Transaction_Amount': 'PPC'},
+    inplace=True
+)
 
-print(last_txn.head())
+# --------------------------------
+# 2. Calculate EOP
+# --------------------------------
 
-
-
-reference_date = txn_df['Transaction_Date'].max()
-
-last_txn['Days_Since_Last_Transaction'] = (
-    reference_date - last_txn['Last_Transaction_Date']
-).dt.days
-
-
-bins = [
-    -1, 100, 300, 600, 900,
-    1200, 2000, 3000, 5000, float('inf')
+balance_cols = [
+    col for col in acc_df.columns
+    if col.startswith('Balance_')
+    and col.replace('Balance_', '').isdigit()
 ]
 
-labels = [
-    '0-100',
-    '100-300',
-    '300-600',
-    '600-900',
-    '900-1200',
-    '1200-2000',
-    '2000-3000',
-    '3000-5000',
-    '5000+'
-]
+# Sort balance columns by date
+balance_cols = sorted(balance_cols)
 
-last_txn['Days_Bin'] = pd.cut(
-    last_txn['Days_Since_Last_Transaction'],
-    bins=bins,
-    labels=labels
+# Latest available balance column
+latest_balance_col = balance_cols[-1]
+
+acc_df['EOP'] = pd.to_numeric(
+    acc_df[latest_balance_col], errors='coerce'
+)
+
+# --------------------------------
+# 3. Merge PPC into account data
+# --------------------------------
+
+acc_df = acc_df.merge(
+    ppc_df,
+    on='Account_ID',
+    how='left'
+)
+
+acc_df['PPC'] = acc_df['PPC'].fillna(0)
+
+
+
+# Days since last transaction
+
+acc_df['Days from Last Transaction'] = pd.to_numeric(
+    acc_df['Days from Last Transaction'],
+    errors='coerce'
+)
+
+acc_df['Bins of Days from Last Transaction'] = pd.cut(
+    acc_df['Days from Last Transaction'],
+    bins=[-np.inf, 30, 60, 90, np.inf],
+    labels=['0-30 Days', '31-60 Days', '61-90 Days', '90 + Days']
+)
+
+# Days to activation
+
+acc_df['Days to Activation'] = pd.to_numeric(
+    acc_df['Days to Activation'],
+    errors='coerce'
+)
+
+acc_df['Bins of Days to Activation'] = pd.cut(
+    acc_df['Days to Activation'],
+    bins=[-np.inf, 5, 10, 20, 30, np.inf],
+    labels=['0-5 Days', '5-10 Days', '10-20 Days',
+            '20-30 Days', '30+ Days']
 )
 
 
-dashboard = (
-    last_txn['Days_Bin']
-    .value_counts(sort=False)
+dashboard_1a = (
+    acc_df.groupby(
+        'Bins of Days from Last Transaction',
+        observed=False
+    )
+    .agg(
+        **{
+            '# Accounts': ('Account_ID', 'nunique'),
+            '# Transactions': ('Number of Transactions', 'sum'),
+            'Average PPC': ('PPC', 'mean'),
+            'Average EOP Balance (last 30 Days)': ('EOP', 'mean')
+        }
+    )
     .reset_index()
 )
 
-dashboard.columns = [
-    'Days Since Last Transaction',
-    'Account Count'
-]
-
-print(dashboard)
-
-
-import matplotlib.pyplot as plt
-
-plt.figure(figsize=(12, 6))
-
-plt.bar(
-    dashboard['Days Since Last Transaction'].astype(str),
-    dashboard['Account Count']
+dashboard_1a.rename(
+    columns={
+        'Bins of Days from Last Transaction':
+        'Days Since Last Transaction'
+    },
+    inplace=True
 )
 
-plt.title('Account-Level Days Since Last Transaction')
-plt.xlabel('Days Since Last Transaction')
-plt.ylabel('Number of Accounts')
+dashboard_1a
 
-plt.xticks(rotation=45)
-plt.tight_layout()
-plt.show()
+
+dashboard_1b = (
+    acc_df.groupby(
+        'Bins of Days to Activation',
+        observed=False
+    )
+    .agg(
+        **{
+            '# Accounts': ('Account_ID', 'nunique'),
+            'Average EOP Balance (last 30 Days)': ('EOP', 'mean')
+        }
+    )
+    .reset_index()
+)
+
+dashboard_1b.rename(
+    columns={
+        'Bins of Days to Activation': 'Days to Activation'
+    },
+    inplace=True
+)
+
+dashboard_1b
+
+
+
+dashboard_1c = pd.crosstab(
+    acc_df['Bins of Days from Last Transaction'],
+    acc_df['Bins of Days to Activation'],
+    dropna=False
+)
+
+# Ensure all required rows and columns are displayed
+
+dashboard_1c = dashboard_1c.reindex(
+    index=[
+        '0-30 Days',
+        '31-60 Days',
+        '61-90 Days',
+        '90 + Days'
+    ],
+    columns=[
+        '0-5 Days',
+        '5-10 Days',
+        '10-20 Days',
+        '20-30 Days',
+        '30+ Days'
+    ],
+    fill_value=0
+)
+
+dashboard_1c.index.name = 'Days since last Transaction'
+dashboard_1c.columns.name = 'Days to Activation'
+
+dashboard_1c
+
+
+print("========== DASHBOARD 1(a) ==========")
+display(dashboard_1a)
+
+print("========== DASHBOARD 1(b) ==========")
+display(dashboard_1b)
+
+print("========== DASHBOARD 1(c) ==========")
+display(dashboard_1c)
