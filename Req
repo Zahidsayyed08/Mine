@@ -1,83 +1,34 @@
-import pandas as pd
-import numpy as np
-
-# Rank ADB in descending order
-acc_df['ADB_Rank'] = acc_df['ADB_Jan2022'].rank(
-    method='first',
-    ascending=False
+# Convert transaction date into datetime
+txn_df['Transaction_Date'] = pd.to_datetime(
+    txn_df['Transaction_Date']
 )
 
-# Divide into 5 groups
-acc_df['ADB_Decile'] = pd.qcut(
-    acc_df['ADB_Rank'],
-    q=5,
-    labels=[
-        'ADB Balance Decile 1',
-        'ADB Balance Decile 2',
-        'ADB Balance Decile 3',
-        'ADB Balance Decile 4',
-        'ADB Balance Decile 5'
-    ]
+# Sort transactions by date and time
+txn_df = txn_df.sort_values(
+    ['Transaction_Date', 'Transaction_time']
 )
 
-# Check output
-acc_df[
-    ['Account_ID', 'ADB_Jan2022', 'ADB_Rank', 'ADB_Decile']
-].head(20)
-
-
-dashboard_accounts = pd.crosstab(
-    acc_df['ADB_Decile'],
-    acc_df['CDD Status']
+# Get latest net balance for each account
+balance_df = (
+    txn_df.dropna(subset=['Net_Balance'])
+    .drop_duplicates(subset='Account_ID', keep='last')
+    [['Account_ID', 'Net_Balance']]
 )
 
-# Keep required order
-dashboard_accounts = dashboard_accounts.reindex(
-    index=[
-        'ADB Balance Decile 1',
-        'ADB Balance Decile 2',
-        'ADB Balance Decile 3',
-        'ADB Balance Decile 4',
-        'ADB Balance Decile 5'
-    ],
-    columns=['SDD', 'EDD', 'MEDD'],
-    fill_value=0
-)
+# Merge into account-level dataframe
+acc_df = acc_df.drop(columns=['Balance_Today'], errors='ignore')
 
-dashboard_accounts.index.name = 'ADB Balance'
-dashboard_accounts.columns.name = None
-
-dashboard_accounts
-
-
-# Merge account-level information into transaction data
-
-txn_df = txn_df.merge(
-    acc_df[['Account_ID', 'ADB_Decile', 'CDD Status']],
+acc_df = acc_df.merge(
+    balance_df,
     on='Account_ID',
     how='left'
 )
 
-# Count transactions
-dashboard_transactions = pd.crosstab(
-    txn_df['ADB_Decile'],
-    txn_df['CDD Status']
+# Rename Net_Balance to Balance_Today
+acc_df.rename(
+    columns={'Net_Balance': 'Balance_Today'},
+    inplace=True
 )
 
-# Keep required order
-dashboard_transactions = dashboard_transactions.reindex(
-    index=[
-        'ADB Balance Decile 1',
-        'ADB Balance Decile 2',
-        'ADB Balance Decile 3',
-        'ADB Balance Decile 4',
-        'ADB Balance Decile 5'
-    ],
-    columns=['SDD', 'EDD', 'MEDD'],
-    fill_value=0
-)
-
-dashboard_transactions.index.name = 'ADB Balance'
-dashboard_transactions.columns.name = None
-
-dashboard_transactions
+# Accounts without transactions = 0
+acc_df['Balance_Today'] = acc_df['Balance_Today'].fillna(0)
