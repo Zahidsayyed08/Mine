@@ -1,34 +1,89 @@
-# Convert transaction date into datetime
-txn_df['Transaction_Date'] = pd.to_datetime(
-    txn_df['Transaction_Date']
+# Convert account opening date to datetime
+acc_df['Account_opn_Date'] = pd.to_datetime(
+    acc_df['Account_opn_Date'],
+    errors='coerce'
 )
 
-# Sort transactions by date and time
-txn_df = txn_df.sort_values(
-    ['Transaction_Date', 'Transaction_time']
-)
+# Map Account_ID to Client_ID
+account_client = cli_df[
+    ['Account_ID', 'Client_ID']
+].drop_duplicates()
 
-# Get latest net balance for each account
-balance_df = (
-    txn_df.dropna(subset=['Net_Balance'])
-    .drop_duplicates(subset='Account_ID', keep='last')
-    [['Account_ID', 'Net_Balance']]
-)
-
-# Merge into account-level dataframe
-acc_df = acc_df.drop(columns=['Balance_Today'], errors='ignore')
-
-acc_df = acc_df.merge(
-    balance_df,
+# Merge Client_ID into account dataframe
+temp_df = acc_df.merge(
+    account_client,
     on='Account_ID',
     how='left'
 )
 
-# Rename Net_Balance to Balance_Today
-acc_df.rename(
-    columns={'Net_Balance': 'Balance_Today'},
+# Calculate minimum account opening date per client
+client_open = (
+    temp_df.groupby('Client_ID')['Account_opn_Date']
+    .min()
+    .reset_index()
+)
+
+client_open.rename(
+    columns={'Account_opn_Date': 'Client_Open_Date'},
     inplace=True
 )
 
-# Accounts without transactions = 0
-acc_df['Balance_Today'] = acc_df['Balance_Today'].fillna(0)
+# Update cli_df
+cli_df = cli_df.drop(
+    columns=['Client_Open_Date'],
+    errors='ignore'
+)
+
+cli_df = cli_df.merge(
+    client_open,
+    on='Client_ID',
+    how='left'
+)
+
+
+
+# Convert names to string and handle missing values
+name_cols = ['first_name', 'middle_name', 'last_name']
+
+for col in name_cols:
+    cli_df[col] = cli_df[col].fillna('').astype(str).str.strip()
+
+# Join names and remove extra spaces
+cli_df['Client_Full_Name'] = (
+    cli_df[name_cols]
+    .agg(' '.join, axis=1)
+    .str.replace(r'\s+', ' ', regex=True)
+    .str.strip()
+)
+
+
+# Convert CDD Due Date into datetime
+acc_df['CDD Due Date'] = pd.to_datetime(
+    acc_df['CDD Due Date'],
+    errors='coerce'
+)
+
+# Calculate minimum CDD Due Date per client
+client_cdd = (
+    temp_df.assign(
+        CDD_Due_Date=pd.to_datetime(
+            temp_df['CDD Due Date'],
+            errors='coerce'
+        )
+    )
+    .groupby('Client_ID')['CDD_Due_Date']
+    .min()
+    .reset_index()
+)
+
+# Update cli_df
+cli_df = cli_df.drop(
+    columns=['CDD_Due_Date'],
+    errors='ignore'
+)
+
+cli_df = cli_df.merge(
+    client_cdd,
+    on='Client_ID',
+    how='left'
+)
