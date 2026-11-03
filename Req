@@ -1,132 +1,105 @@
-# Create Account_ID and Client_ID mapping
-account_client = cli_df[
-    ['Account_ID', 'Client_ID']
+# Remove duplicate client records
+client_kyc = cli_df[
+    ['Client_ID', 'Region', 'KYC_Status']
 ].drop_duplicates()
 
-# Merge account-level CDD status with Client_ID
-temp_df = acc_df[
-    ['Account_ID', 'CDD Status']
-].merge(
-    account_client,
-    on='Account_ID',
-    how='left'
+# Create cross-tab
+dashboard_7 = pd.crosstab(
+    client_kyc['Region'],
+    client_kyc['KYC_Status']
 )
 
-# Clean CDD Status
-temp_df['CDD Status'] = (
-    temp_df['CDD Status']
-    .astype(str)
-    .str.strip()
-    .str.upper()
+# Keep required column order
+dashboard_7 = dashboard_7.reindex(
+    columns=['Active', 'Dormant', 'Expired'],
+    fill_value=0
 )
 
-# Function to calculate client CDD status
-def get_cdd_status(x):
-
-    if 'MEDD' in x.values:
-        return 'MEDD'
-
-    elif 'EDD' in x.values:
-        return 'EDD'
-
-    else:
-        return 'SDD'
+# Display
+dashboard_7
 
 
-# Calculate CDD Status at Client level
-client_cdd_status = (
-    temp_df.groupby('Client_ID')['CDD Status']
-    .apply(get_cdd_status)
-    .reset_index(name='CDD_Status')
+
+
+
+
+# Remove duplicate client records
+client_cdd = cli_df[
+    ['Client_ID', 'Region', 'CDD_Status']
+].drop_duplicates()
+
+# Create cross-tab
+dashboard_8 = pd.crosstab(
+    client_cdd['Region'],
+    client_cdd['CDD_Status']
 )
 
-# Update cli_df
-cli_df = cli_df.drop(
-    columns=['CDD_Status'],
-    errors='ignore'
+# Keep required column order
+dashboard_8 = dashboard_8.reindex(
+    columns=['SDD', 'EDD', 'MEDD'],
+    fill_value=0
 )
 
-cli_df = cli_df.merge(
-    client_cdd_status,
-    on='Client_ID',
-    how='left'
-)
-
-
-
-# Merge account-level KYC status with Client_ID
-temp_kyc = acc_df[
-    ['Account_ID', 'KYC Status']
-].merge(
-    account_client,
-    on='Account_ID',
-    how='left'
-)
-
-# Clean KYC Status
-temp_kyc['KYC Status'] = (
-    temp_kyc['KYC Status']
-    .astype(str)
-    .str.strip()
-    .str.upper()
-)
-
-# Function to calculate client KYC status
-def get_kyc_status(x):
-
-    if 'ACTIVE' in x.values:
-        return 'Active'
-
-    elif 'DORMANT' in x.values:
-        return 'Dormant'
-
-    else:
-        return 'Expired'
-
-
-# Calculate KYC Status at Client level
-client_kyc_status = (
-    temp_kyc.groupby('Client_ID')['KYC Status']
-    .apply(get_kyc_status)
-    .reset_index(name='KYC_Status')
-)
-
-# Update cli_df
-cli_df = cli_df.drop(
-    columns=['KYC_Status'],
-    errors='ignore'
-)
-
-cli_df = cli_df.merge(
-    client_kyc_status,
-    on='Client_ID',
-    how='left'
-)
+# Display
+dashboard_8
 
 
 
 
 
-# Count unique accounts for each client
-client_ppc = (
-    account_client.groupby('Client_ID')['Account_ID']
+total_customers = (
+    cli_df.groupby('Region')['Client_ID']
     .nunique()
-    .reset_index(name='PPC')
+    .reset_index(name='Total Customers')
+)
+total_accounts = (
+    acc_df.merge(
+        cli_df[['Account_ID', 'Region']].drop_duplicates('Account_ID'),
+        on='Account_ID',
+        how='left'
+    )
+    .groupby('Region')['Account_ID']
+    .nunique()
+    .reset_index(name='Total Accounts')
+)
+# Create account-region mapping
+account_region = (
+    cli_df[['Account_ID', 'Region']]
+    .drop_duplicates('Account_ID')
 )
 
-# Update cli_df
-cli_df = cli_df.drop(
-    columns=['PPC'],
-    errors='ignore'
-)
-
-cli_df = cli_df.merge(
-    client_ppc,
-    on='Client_ID',
+# Merge region into transaction data
+txn_region = txn_df.merge(
+    account_region,
+    on='Account_ID',
     how='left'
 )
 
-cli_df['PPC'] = cli_df['PPC'].fillna(0).astype(int)
+# Count transactions region-wise
+total_transactions = (
+    txn_region.groupby('Region')
+    .size()
+    .reset_index(name='Total Transactions')
+)
+dashboard_9 = (
+    total_customers
+    .merge(total_accounts, on='Region', how='outer')
+    .merge(total_transactions, on='Region', how='outer')
+)
 
+# Replace missing values with zero
+dashboard_9 = dashboard_9.fillna(0)
 
+# Convert counts to integer
+count_cols = [
+    'Total Customers',
+    'Total Accounts',
+    'Total Transactions'
+]
+
+dashboard_9[count_cols] = (
+    dashboard_9[count_cols].astype(int)
+)
+
+dashboard_9
 
